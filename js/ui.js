@@ -229,11 +229,10 @@ function renderSearchHistory() {
 
     // 创建一个包含标题和清除按钮的行
     historyContainer.innerHTML = `
-        <div class="flex justify-between items-center w-full mb-2">
-            <div class="text-gray-500">最近搜索:</div>
-            <button id="clearHistoryBtn" class="text-gray-500 hover:text-white transition-colors"
-                    onclick="clearSearchHistory()" aria-label="清除搜索历史">
-                清除搜索历史
+        <div class="lt-recent-head">
+            <span>最近搜索</span>
+            <button id="clearHistoryBtn" type="button" onclick="clearSearchHistory()" aria-label="清除搜索历史">
+                清除
             </button>
         </div>
     `;
@@ -267,11 +266,37 @@ function renderSearchHistory() {
 
         tag.onclick = function() {
             document.getElementById('searchInput').value = item.text;
+            setRecentSearchesOpen(false);
             search();
         };
         historyContainer.appendChild(tag);
     });
 }
+
+// 最近搜索以下拉面板显示：聚焦搜索框时展开，开始输入、搜索、点外部或按 Esc 时收起
+function setRecentSearchesOpen(open) {
+    const wrap = document.getElementById('searchArea');
+    if (wrap) wrap.classList.toggle('is-recent-open', open);
+}
+
+function setupRecentSearchesDropdown() {
+    const wrap = document.getElementById('searchArea');
+    const input = document.getElementById('searchInput');
+    if (!wrap || !input || wrap.dataset.recentReady) return;
+    wrap.dataset.recentReady = 'true';
+    const open = () => setRecentSearchesOpen(true);
+    input.addEventListener('focus', open);
+    input.addEventListener('click', open);
+    input.addEventListener('input', () => setRecentSearchesOpen(false));
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === 'Escape') setRecentSearchesOpen(false);
+    });
+    wrap.querySelector('.lt-search-submit')?.addEventListener('click', () => setRecentSearchesOpen(false));
+    document.addEventListener('pointerdown', event => {
+        if (!wrap.contains(event.target)) setRecentSearchesOpen(false);
+    });
+}
+document.addEventListener('DOMContentLoaded', setupRecentSearchesDropdown);
 
 // 删除单条搜索历史记录
 function deleteSingleSearchHistory(query) {
@@ -523,8 +548,8 @@ function loadViewingHistory() {
 
         // 构建历史记录项HTML，添加删除按钮，需要放在position:relative的容器中
         return `
-            <div class="history-item cursor-pointer relative group" onclick="playFromHistory('${item.url}', '${safeTitle}', ${item.episodeIndex || 0}, ${item.playbackPosition || 0})">
-                <button onclick="event.stopPropagation(); deleteHistoryItem('${safeURL}')"
+            <div class="history-item cursor-pointer relative group" onclick="playFromHistory(${inlineJsArg(item.url)}, ${inlineJsArg(item.title)}, ${Number(item.episodeIndex) || 0}, ${Number(item.playbackPosition) || 0})">
+                <button onclick="event.stopPropagation(); deleteHistoryItem(${inlineJsArg(safeURL)})"
                         class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-gray-400 hover:text-red-400 p-1 rounded-full hover:bg-gray-800 z-10"
                         title="删除记录">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

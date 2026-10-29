@@ -108,6 +108,7 @@ async function fetchVodApiJson(apiUrl, headers = API_CONFIG.search.headers, oute
 
 function normalizeApiList(data, apiId, context) {
     if (!data || !Array.isArray(data.list)) return [];
+    window.SourceHosts?.learnItems(data.list);
     return data.list.map(item => withSourceInfo(item, apiId, context));
 }
 
@@ -136,44 +137,32 @@ async function searchByAPIAndKeyWord(apiId, query, onBatch, signal) {
         // 确定需要获取的额外页数 (最多获取maxPages页)
         const pagesToFetch = Math.min(pageCount - 1, API_CONFIG.search.maxPages - 1);
         
-        // 如果有额外页数，获取更多页的结果
+        // 额外页限并发拉取，按页码顺序合并，避免一次对同一源打出大量请求
         if (pagesToFetch > 0) {
-            const additionalPagePromises = [];
-            
-            for (let page = 2; page <= pagesToFetch + 1; page++) {
-                // 构建分页URL
-                const pageUrl = context.apiBaseUrl + API_CONFIG.search.pagePath
-                    .replace('{query}', encodeURIComponent(query))
-                    .replace('{page}', page);
-                
-                // 创建获取额外页的Promise
-                const pagePromise = (async () => {
+            const pageResults = [];
+            let nextPage = 2;
+            const lastPage = pagesToFetch + 1;
+            const worker = async () => {
+                while (nextPage <= lastPage && !signal?.aborted) {
+                    const page = nextPage++;
+                    const pageUrl = context.apiBaseUrl + API_CONFIG.search.pagePath
+                        .replace('{query}', encodeURIComponent(query))
+                        .replace('{page}', page);
                     try {
                         const pageData = await fetchVodApiJson(pageUrl, API_CONFIG.search.headers, signal);
-                        
-                        if (!pageData || !pageData.list || !Array.isArray(pageData.list)) return [];
-                        
-                        // 处理当前页结果
+                        if (!pageData || !Array.isArray(pageData.list)) continue;
                         const batch = filterSearchResultsByQuery(normalizeApiList(pageData, apiId, context), query);
+                        pageResults[page] = batch;
                         if (batch.length && !signal?.aborted) onBatch?.(batch);
-                        return batch;
                     } catch (error) {
-                        console.warn(`API ${apiId} 第${page}页搜索失败:`, error);
-                        return [];
+                        if (!signal?.aborted) console.warn(`API ${apiId} 第${page}页搜索失败:`, error);
                     }
-                })();
-                
-                additionalPagePromises.push(pagePromise);
-            }
-            
-            // 等待所有额外页的结果
-            const additionalResults = await Promise.all(additionalPagePromises);
-            
-            // 合并所有页的结果
-            additionalResults.forEach(pageResults => {
-                if (pageResults.length > 0) {
-                    results.push(...pageResults);
                 }
+            };
+            const concurrency = Math.max(1, API_CONFIG.search.pageConcurrency || 3);
+            await Promise.all(Array.from({ length: Math.min(concurrency, pagesToFetch) }, worker));
+            pageResults.forEach(batch => {
+                if (batch?.length) results.push(...batch);
             });
         }
         

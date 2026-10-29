@@ -19,7 +19,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # 安装依赖
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # 可选出站代理支持：设置 PROXY_URL 后通过 proxychains-ng 转发容器内请求
 RUN apk add --no-cache proxychains-ng

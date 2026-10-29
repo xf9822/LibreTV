@@ -1,19 +1,13 @@
+# 用本仓库的代码构建镜像（docker compose up -d --build），而不是拉取上游的旧镜像
 services:
   libretv:
-    image: bestzwei/libretv:latest
+    build: .
+    image: libretv:local
     container_name: libretv
     ports:
-      - "8899:8080" # 将内部 8080 端口映射到主机的 8899 端口
+      - "8899:8080" # 浏览器访问 http://服务器IP:8899
     environment:
-      - PASSWORD=${PASSWORD:-your_password} # 可将 your_password 修改为你想要的密码，默认为 your_password
-#    volumes:
-#      - libretv_data:/app # 不要修改
+      - PASSWORD=${PASSWORD:-your_password} # 必填：访问密码，务必改成自己的
+      # - PASSWORD_HASH=   # 也可以只填密码的 SHA-256，不留明文；填了它可以不填 PASSWORD
+      # - PROXY_URL=socks5://192.168.1.2:7890   # 可选：服务器访问资源站时走代理（http / socks4 / socks5）
     restart: unless-stopped
-
-#volumes:
-#  libretv_data:
-#    driver: local
-#    driver_opts:
-#      type: none
-#      o: bind
-#      device: ${PWD:-.}/data # 可将 ${PWD:-.} 修改为你想要的路径，默认为当前目录下的 data 文件夹

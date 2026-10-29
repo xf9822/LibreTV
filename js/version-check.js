@@ -132,11 +132,31 @@ function formatVersion(versionString) {
     return cleanedString;
 }
 
+// 当前发布版本号（来自 js/config.js 的 SITE_CONFIG.version）
+function currentReleaseVersion() {
+    try {
+        const version = typeof SITE_CONFIG !== 'undefined' ? String(SITE_CONFIG.version || '').trim() : '';
+        return /^[0-9A-Za-z.\-]+$/.test(version) ? version : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+// 页脚版本文字：版本号 + 构建时间，例如 “v1.2.31（2026-10-27 14:00）”
+function formatVersionLabel(formattedBuildTime) {
+    const version = currentReleaseVersion();
+    if (!version) return formattedBuildTime;
+    return formattedBuildTime ? `v${version}（${formattedBuildTime}）` : `v${version}`;
+}
+
 // 创建错误版本信息元素
 function createErrorVersionElement(errorMessage) {
     const errorElement = document.createElement('p');
     errorElement.className = 'text-gray-500 text-sm mt-1 text-center md:text-left';
-    errorElement.innerHTML = `版本: <span class="text-amber-500">检测失败</span>`;
+    const version = currentReleaseVersion();
+    errorElement.innerHTML = version
+        ? `版本: v${version} <span class="text-amber-500">(版本检测失败)</span>`
+        : `版本: <span class="text-amber-500">检测失败</span>`;
     errorElement.title = errorMessage;
     return errorElement;
 }
@@ -157,7 +177,7 @@ function addVersionInfoToFooter() {
         versionElement.className = 'text-gray-500 text-sm mt-1 text-center md:text-left';
         
         // 添加当前版本信息
-        versionElement.innerHTML = `版本: ${result.currentFormatted}`;
+        versionElement.innerHTML = `版本: ${formatVersionLabel(result.currentFormatted)}`;
         
         // 如果有更新，添加更新提示
         if (result.hasUpdate === true) {
@@ -178,7 +198,7 @@ function addVersionInfoToFooter() {
             }, 100);
         } else if (result.hasUpdate === false) {
             // 如果没有更新，显示当前版本为最新版本
-            versionElement.innerHTML = `版本: ${result.currentFormatted} <span class="text-green-500">(最新版本)</span>`;
+            versionElement.innerHTML = `版本: ${formatVersionLabel(result.currentFormatted)} <span class="text-green-500">(最新版本)</span>`;
         } else {
             versionElement.innerHTML += ' <span class="text-amber-500" title="暂时无法连接版本源">(更新检查不可用)</span>';
         }

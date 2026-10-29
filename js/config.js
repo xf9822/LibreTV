@@ -17,12 +17,12 @@ const SITE_CONFIG = {
     url: '',
     description: '免费在线视频搜索与观看平台',
     logo: 'image/logo.png',
-    version: '1.2.28'
+    version: '1.2.47'
 };
 
-const DEFAULT_SELECTED_APIS = ['ysgc', 'jszy', 'wujin', 'maoyan'];
+const DEFAULT_SELECTED_APIS = ['ysgc', 'ffzy', 'bfzy', 'jszy', 'wujin'];
 const DEFAULT_API_MIGRATION_KEY = 'defaultApiMigrationVersion';
-const DEFAULT_API_MIGRATION_VERSION = '20260511-sources-v2';
+const DEFAULT_API_MIGRATION_VERSION = '20261028-sources-v3';
 
 function escapeHtmlAttr(value) {
     return String(value ?? '')
@@ -31,6 +31,12 @@ function escapeHtmlAttr(value) {
         .replace(/'/g, '&#39;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
+}
+
+// 内联事件处理器（onclick="fn(...)"）里的参数必须先转成 JS 字面量再做属性转义，
+// 否则片名里的单引号会截断代码，源站返回的恶意片名还能注入脚本。
+function inlineJsArg(value) {
+    return escapeHtmlAttr(JSON.stringify(String(value ?? '')));
 }
 
 function normalizeImageUrl(rawUrl, baseUrl = '') {
@@ -119,6 +125,7 @@ window.DEFAULT_SELECTED_APIS = DEFAULT_SELECTED_APIS;
 window.DEFAULT_API_MIGRATION_KEY = DEFAULT_API_MIGRATION_KEY;
 window.DEFAULT_API_MIGRATION_VERSION = DEFAULT_API_MIGRATION_VERSION;
 window.escapeHtmlAttr = escapeHtmlAttr;
+window.inlineJsArg = inlineJsArg;
 window.normalizeImageUrl = normalizeImageUrl;
 window.setImageProxyFallback = setImageProxyFallback;
 window.setImagePlaceholder = setImagePlaceholder;
@@ -140,7 +147,9 @@ const API_CONFIG = {
         // 只拼接参数部分，不再包含 /api.php/provide/vod/
         path: '?ac=videolist&wd=',
         pagePath: '?ac=videolist&wd={query}&pg={page}',
-        maxPages: 50, // 最大获取页数
+        // 每页都带完整播放地址；宽泛关键词翻满 50 页会对每个源打出几十个并发代理请求，容易被源站限流
+        maxPages: 10, // 最大获取页数（约 200 条）
+        pageConcurrency: 3, // 单个源同时请求的翻页数
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': 'application/json'

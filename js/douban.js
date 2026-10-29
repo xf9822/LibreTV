@@ -122,6 +122,185 @@ function refreshDoubanAdultTagState() {
     }
 }
 
+// 组合筛选（类型 / 地区 / 年代 / 排序）：打开筛选面板时，列表改为按筛选条件加载，并支持“加载更多”
+let doubanFilterState = window.DoubanFilter ? window.DoubanFilter.readState() : null;
+let doubanFilterStart = 0;
+
+function isDoubanFilterMode() {
+    return Boolean(doubanFilterState?.open);
+}
+
+function setDoubanFilterOpen(open) {
+    if (!doubanFilterState) return;
+    doubanFilterState.open = open;
+    window.DoubanFilter.writeState(doubanFilterState);
+}
+
+function setDoubanButtonVisible(id, visible) {
+    const button = document.getElementById(id);
+    if (button) button.style.display = visible ? '' : 'none';
+}
+
+function renderDoubanFilterPanel() {
+    const panel = document.getElementById('douban-filter-panel');
+    const filterMode = isDoubanFilterMode();
+    setDoubanButtonVisible('douban-refresh', !filterMode);
+    if (!filterMode) setDoubanButtonVisible('douban-more', false);
+    if (!panel || !doubanFilterState) return;
+    panel.hidden = !filterMode;
+    if (!filterMode) {
+        panel.replaceChildren();
+        return;
+    }
+    const kind = doubanMovieTvCurrentSwitch;
+    window.DoubanFilter.renderPanel(panel, kind, doubanFilterState[kind], nextFilter => {
+        doubanFilterState[kind] = nextFilter;
+        window.DoubanFilter.writeState(doubanFilterState);
+        renderDoubanFilterPanel();
+        loadDoubanFilterResults(true);
+    });
+}
+
+function toggleDoubanFilter() {
+    setDoubanFilterOpen(!isDoubanFilterMode());
+    renderDoubanTags();
+    if (localStorage.getItem('doubanEnabled') === 'true') {
+        renderRecommend(doubanCurrentTag, doubanPageSize, doubanPageStart);
+    }
+}
+
+function loadDoubanFilterResults(reset = true) {
+    const container = document.getElementById('douban-results');
+    if (!container || !doubanFilterState) return;
+    const requestId = ++doubanRenderSeq;
+    const isCurrentRequest = () => requestId === doubanRenderSeq;
+    const kind = doubanMovieTvCurrentSwitch;
+    const filter = doubanFilterState[kind];
+    const start = reset ? 0 : doubanFilterStart;
+    const moreButton = document.getElementById('douban-more');
+
+    if (reset) {
+        showDoubanLoadingOverlay(container);
+        setDoubanButtonVisible('douban-more', false);
+    } else if (moreButton) {
+        moreButton.disabled = true;
+        moreButton.textContent = '加载中…';
+    }
+
+    const target = window.DoubanFilter.buildRecommendUrl(kind, filter, start);
+    return fetchDoubanDataShared(target)
+        .then(data => {
+            if (!isCurrentRequest()) return;
+            const page = window.DoubanFilter.mapRecommend(data);
+            doubanFilterStart = start + page.received;
+            renderDoubanCards({ subjects: page.subjects }, container, {
+                append: !reset,
+                emptyText: '没有符合条件的影片，换个条件试试'
+            });
+            setDoubanButtonVisible('douban-more', page.received > 0 && doubanFilterStart < page.total);
+        })
+        .catch(error => {
+            if (!isCurrentRequest()) return;
+            console.error('豆瓣筛选加载失败：', error);
+            if (reset) {
+                container.innerHTML = `
+                    <div class="col-span-full text-center py-8">
+                        <div class="text-red-400">❌ 筛选结果加载失败，请稍后重试</div>
+                        <div class="text-gray-500 text-sm mt-2">可以先关闭“筛选”，用上方标签浏览</div>
+                    </div>
+                `;
+            } else {
+                showToast('加载失败，请稍后重试', 'error');
+            }
+        })
+        .finally(() => {
+            if (moreButton) {
+                moreButton.disabled = false;
+                moreButton.textContent = '加载更多';
+            }
+        });
+}
+
+function showDoubanLoadingOverlay(container) {
+    container.classList.add('relative');
+    container.querySelector('.douban-loading-overlay')?.remove();
+    container.insertAdjacentHTML('beforeend', `
+        <div class="douban-loading-overlay absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-10">
+            <div class="flex items-center justify-center">
+                <div class="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin inline-block"></div>
+                <span class="text-pink-500 ml-4">加载中...</span>
+            </div>
+        </div>
+    `);
+}
+
+// 找不到播放源的豆瓣条目自动隐藏（可点“显示”看回来）；筛选模式下隐藏太多时自动补一页
+let doubanHiddenCount = 0;
+let doubanAutoLoads = 0;
+let doubanAutoLoadTimer = null;
+const DOUBAN_MIN_VISIBLE = 12;
+
+function updateDoubanHiddenNote() {
+    const note = document.getElementById('douban-hidden-note');
+    if (!note) return;
+    note.hidden = doubanHiddenCount === 0;
+    const count = note.querySelector('[data-hidden-count]');
+    if (count) count.textContent = String(doubanHiddenCount);
+}
+
+function toggleDoubanUnavailable() {
+    const container = document.getElementById('douban-results');
+    const button = document.querySelector('#douban-hidden-note button');
+    if (!container || !button) return;
+    const showing = container.classList.toggle('show-unavailable');
+    button.textContent = showing ? '隐藏' : '显示';
+    button.setAttribute('aria-pressed', String(showing));
+}
+
+function visibleDoubanCards(container) {
+    return [...container.children].filter(card => card.dataset.doubanCard && !card.classList.contains('douban-unavailable')).length;
+}
+
+function maybeAutoLoadMoreDouban(container) {
+    if (!isDoubanFilterMode() || doubanAutoLoads >= 3) return;
+    clearTimeout(doubanAutoLoadTimer);
+    doubanAutoLoadTimer = setTimeout(() => {
+        const moreButton = document.getElementById('douban-more');
+        const canLoadMore = moreButton && moreButton.style.display !== 'none' && !moreButton.disabled;
+        if (canLoadMore && visibleDoubanCards(container) < DOUBAN_MIN_VISIBLE) {
+            doubanAutoLoads++;
+            loadDoubanFilterResults(false);
+        }
+    }, 800);
+}
+
+// Douban sends a generic picture (…/pics/subject/movie_normal.png) for titles without a poster yet.
+function isDoubanDefaultPoster(url) {
+    return /doubanio\.com\/f\/|\/pics\/subject\/|_default/.test(String(url || ''));
+}
+
+function checkDoubanCardAvailability(card, item, container) {
+    if (!window.SourceAvailability) return;
+    const request = {
+        title: item.title,
+        year: item.year || '',
+        kind: doubanMovieTvCurrentSwitch,
+        isWanted: () => card.isConnected
+    };
+    window.SourceAvailability.check(request).then(available => {
+        if (available && isDoubanDefaultPoster(item.cover)) {
+            const cover = window.SourceAvailability.coverOf(request);
+            const image = card.querySelector('img');
+            if (cover && image) { image.dataset.originalSrc = cover; image.src = cover; }
+        }
+        if (available !== false || !card.isConnected) return;
+        card.classList.add('douban-unavailable');
+        doubanHiddenCount++;
+        updateDoubanHiddenNote();
+        maybeAutoLoadMoreDouban(container);
+    });
+}
+
 let doubanInitialized = false;
 // 最近一次推荐请求的序号：只有最新请求的结果会被渲染
 let doubanRenderSeq = 0;
@@ -150,6 +329,8 @@ function initDouban() {
     renderDoubanMovieTvSwitch();
     renderDoubanTags();
     setupDoubanRefreshBtn();
+    const moreButton = document.getElementById('douban-more');
+    if (moreButton) moreButton.onclick = () => loadDoubanFilterResults(false);
 
     // 设置豆瓣开关的初始状态
     const doubanToggle = document.getElementById('doubanToggle');
@@ -278,10 +459,12 @@ async function fillAndSearchWithDouban(title) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     
-    const preferredSource = API_SITES.dbzy ? 'dbzy' : DEFAULT_SELECTED_APIS.find(apiId => API_SITES[apiId]);
+    const preferredSource = DEFAULT_SELECTED_APIS.find(apiId => API_SITES[apiId]);
+    const hasSearchableSource = typeof selectedAPIs !== 'undefined' &&
+        (typeof getSearchableApiIds === 'function' ? getSearchableApiIds(selectedAPIs) : selectedAPIs).length > 0;
 
-    // 确保推荐搜索有可用资源源被选中
-    if (preferredSource && typeof selectedAPIs !== 'undefined' && !selectedAPIs.includes(preferredSource)) {
+    // 只有一个可搜索的源都没选时才自动补选默认源，不改动用户自己的选择
+    if (preferredSource && !hasSearchableSource && !selectedAPIs.includes(preferredSource)) {
         const sourceCheckbox = document.querySelector(`input[id="api_${preferredSource}"]`);
         if (sourceCheckbox) {
             sourceCheckbox.checked = true;
@@ -418,6 +601,19 @@ function renderDoubanTags(tags) {
     };
     tagContainer.appendChild(manageBtn);
 
+    const filterMode = isDoubanFilterMode();
+    if (doubanFilterState) {
+        const filterBtn = document.createElement('button');
+        filterBtn.id = 'douban-filter-toggle';
+        filterBtn.className = 'douban-filter-toggle py-1.5 px-3.5 rounded text-sm font-medium transition-all duration-300 border ' +
+            (filterMode ? 'bg-pink-600 text-white shadow-md border-white' : 'bg-[#1a1a1a] text-gray-300 hover:bg-pink-700 hover:text-white border-[#333] hover:border-white');
+        filterBtn.setAttribute('aria-expanded', String(filterMode));
+        filterBtn.setAttribute('aria-controls', 'douban-filter-panel');
+        filterBtn.innerHTML = '<span class="flex items-center"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18l-7 8v6l-4 2v-8L3 4z"></path></svg>筛选</span>';
+        filterBtn.onclick = toggleDoubanFilter;
+        tagContainer.appendChild(filterBtn);
+    }
+
     // 添加所有标签
     currentTags.forEach(tag => {
         const btn = document.createElement('button');
@@ -425,8 +621,8 @@ function renderDoubanTags(tags) {
         // 设置样式
         let btnClass = 'py-1.5 px-3.5 rounded text-sm font-medium transition-all duration-300 border ';
         
-        // 当前选中的标签使用高亮样式
-        if (tag === doubanCurrentTag) {
+        // 当前选中的标签使用高亮样式（筛选模式下标签不高亮）
+        if (tag === doubanCurrentTag && !filterMode) {
             btnClass += 'bg-pink-600 text-white shadow-md border-white';
         } else {
             btnClass += 'bg-[#1a1a1a] text-gray-300 hover:bg-pink-700 hover:text-white border-[#333] hover:border-white';
@@ -436,16 +632,20 @@ function renderDoubanTags(tags) {
         btn.textContent = tag;
         
         btn.onclick = function() {
-            if (doubanCurrentTag !== tag) {
+            // 点快捷标签即退出筛选模式
+            if (doubanCurrentTag !== tag || isDoubanFilterMode()) {
+                setDoubanFilterOpen(false);
                 doubanCurrentTag = tag;
                 doubanPageStart = 0;
-                renderRecommend(doubanCurrentTag, doubanPageSize, doubanPageStart);
                 renderDoubanTags();
+                renderRecommend(doubanCurrentTag, doubanPageSize, doubanPageStart);
             }
         };
         
         tagContainer.appendChild(btn);
     });
+
+    renderDoubanFilterPanel();
 }
 
 // 设置换一批按钮事件
@@ -494,21 +694,14 @@ function renderRecommend(tag, pageLimit, pageStart) {
     const container = document.getElementById("douban-results");
     if (!container) return;
 
+    if (isDoubanFilterMode()) {
+        return loadDoubanFilterResults(true);
+    }
+
     const requestId = ++doubanRenderSeq;
     const isCurrentRequest = () => requestId === doubanRenderSeq;
 
-    const loadingOverlayHTML = `
-        <div class="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-10">
-            <div class="flex items-center justify-center">
-                <div class="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin inline-block"></div>
-                <span class="text-pink-500 ml-4">加载中...</span>
-            </div>
-        </div>
-    `;
-
-    container.classList.add("relative");
-    container.querySelector('.douban-loading-overlay')?.remove();
-    container.insertAdjacentHTML('beforeend', loadingOverlayHTML.replace('class="absolute', 'class="douban-loading-overlay absolute'));
+    showDoubanLoadingOverlay(container);
 
     if (tag === ADULT_RECOMMEND_TAG) {
         return renderAdultRecommend(pageLimit, pageStart, isCurrentRequest);
@@ -702,7 +895,7 @@ async function fetchDoubanData(url) {
 }
 
 // 抽取渲染豆瓣卡片的逻辑到单独函数
-function renderDoubanCards(data, container) {
+function renderDoubanCards(data, container, options = {}) {
     // 创建文档片段以提高性能
     const fragment = document.createDocumentFragment();
     const subjects = Array.isArray(data.subjects)
@@ -714,7 +907,7 @@ function renderDoubanCards(data, container) {
         const emptyEl = document.createElement("div");
         emptyEl.className = "col-span-full text-center py-8";
         emptyEl.innerHTML = `
-            <div class="text-pink-500">❌ 暂无数据，请尝试其他分类或刷新</div>
+            <div class="text-pink-500">❌ ${escapeHtmlAttr(options.emptyText || '暂无数据，请尝试其他分类或刷新')}</div>
         `;
         fragment.appendChild(emptyEl);
     } else {
@@ -729,9 +922,7 @@ function renderDoubanCards(data, container) {
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;');
             
-            const safeRate = (item.rate || "暂无")
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
+            const safeRate = escapeHtmlAttr(item.rate || '');
             
             const originalCoverUrl = normalizeImageUrl(item.cover);
             const safeCoverUrl = escapeHtmlAttr(originalCoverUrl);
@@ -744,11 +935,12 @@ function renderDoubanCards(data, container) {
                         onerror="window.setImageProxyFallback(this, this.dataset.originalSrc, '暂无封面')"
                         loading="lazy" referrerpolicy="no-referrer">
                     <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-60"></div>
-                    <div class="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm">
+                    ${safeRate ? `<div class="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm">
                         <span class="text-yellow-400">★</span> ${safeRate}
-                    </div>
+                    </div>` : `<div class="douban-unrated-badge" title="豆瓣评分人数不足，暂未给出评分">暂无评分</div>`}
+                    <div class="douban-unavailable-badge">暂无播放源</div>
                     <div class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-sm hover:bg-[#333] transition-colors">
-                        <a href="${item.url}" target="_blank" rel="noopener noreferrer" title="在豆瓣查看" onclick="event.stopPropagation();">
+                        <a href="${escapeHtmlAttr(item.url)}" target="_blank" rel="noopener noreferrer" title="在豆瓣查看" onclick="event.stopPropagation();">
                             🔗
                         </a>
                     </div>
@@ -759,6 +951,7 @@ function renderDoubanCards(data, container) {
                             title="${safeTitle}">
                         ${safeTitle}
                     </button>
+                    ${item.meta ? `<div class="douban-card-meta">${escapeHtmlAttr(item.meta)}</div>` : ''}
                     <button data-watch-later class="text-xs text-gray-300 mt-2" type="button">稍后看</button>
                 </div>
             `;
@@ -771,11 +964,24 @@ function renderDoubanCards(data, container) {
                 LibreExperience.addWatchLater({title:item.title,year:item.year || '',kind:doubanMovieTvCurrentSwitch === 'tv' ? 'tv' : 'movie'});
                 showToast('已加入稍后看', 'success');
             });
+            card.dataset.doubanCard = 'true';
             fragment.appendChild(card);
+            if (options.checkAvailability !== false) checkDoubanCardAvailability(card, item, container);
         });
     }
     
-    // 清空并添加所有新元素
+    if (!options.append) {
+        doubanHiddenCount = 0;
+        doubanAutoLoads = 0;
+        updateDoubanHiddenNote();
+    }
+
+    // 加载更多时追加到末尾（空结果不追加提示）；否则清空后替换
+    if (options.append) {
+        container.querySelector('.douban-loading-overlay')?.remove();
+        if (subjects.length) container.appendChild(fragment);
+        return;
+    }
     container.innerHTML = "";
     container.appendChild(fragment);
 }

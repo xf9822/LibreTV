@@ -2,6 +2,201 @@
 
 All notable changes to this maintained LibreTV fork are documented here.
 
+## 1.2.47 - 2026-10-28
+
+### Fixed
+
+- Phone fullscreen showed two progress bars after tapping 更多: it switched on the player's own control bar, with its progress bar, while the fullscreen layer's bar stayed visible. 更多 now opens the player settings (speed, 画质增强, 统计信息, skip intro/outro…) above the fullscreen progress bar, on a solid, scrollable panel; tapping the picture closes it, and swipe gestures no longer start inside the panel.
+- A phone held sideways (not fullscreen) showed a player taller than the screen, with its control bar below the bottom edge. In short landscape screens the player now fits the screen height.
+
+## 1.2.46 - 2026-10-28
+
+### Changed
+
+- README rewritten around what the project does today: a feature overview (search with merged versions, automatic source choice, ad filtering, 画质增强, MP4 download, stats panel, daily source check-up, PWA, OpenClash rules), screenshots and a before/after comparison made from test streams, step-by-step deployment for Cloudflare Pages, Docker, Docker Compose and Node.js, an environment variable table, post-deployment checks, how to update, and an FAQ. The version badge now reads `package.json`.
+- Docker: `docker-compose.yml` builds the image from this repository (`docker compose up -d --build`) instead of pulling the upstream `bestzwei/libretv` image, which has none of this fork's features; it documents `PASSWORD_HASH` and `PROXY_URL`. The Dockerfile installs with `npm ci --omit=dev` (the old `--only=production` flag is deprecated). Verified by building the image and running it: pages and new assets are served, the password is injected as a hash and the proxy answers 401 without it.
+
+## 1.2.45 - 2026-10-28
+
+### Added
+
+- 画质增强 → 低画质修复, for TC copies and low-bitrate sources. Before upscaling it smooths compression blocks and noise with an edge-preserving filter at source resolution (small brightness steps are smoothed, real edges stay), and stretches a washed-out picture with automatic levels: about once a second a 64×36 thumbnail gives the 1st and 99th luma percentile, ignoring letterbox black, bounded (black point at most 0.2, white point at least 0.75, a range of at least 0.5) and blended in gradually so it never flickers; saturation is lifted by 10%. Then FSR upscaling with gentle sharpening. On a degraded test clip it widened the brightness range from 91–194 to 66–228, restored colour, and kept fine noise near the original level even after the contrast stretch, where 标准 doubled it; on a well-exposed clip it changed little (range 37–218 → 29–226, detail unchanged).
+
+## 1.2.44 - 2026-10-28
+
+### Added
+
+- Player 画质增强 (player settings → 画质增强: 关闭 / 标准 / 锐利), independent of the graphics card brand and the same on Windows, macOS, Android and iOS. It runs AMD FidelityFX Super Resolution 1.0 (MIT) in the browser through WebGL2: EASU upscales edge-aware to the displayed size in device pixels, then RCAS sharpens with noise detection. 标准 sharpens moderately, 锐利 fully (old or soft sources, animation). Frames are drawn only when the video presents a new one (`requestVideoFrameCallback`), the choice is remembered, and the stats panel shows the mode and sizes. If frames start dropping, it first draws at 1× device pixels and then turns itself off with a notice; browsers without WebGL2 do not show the option. Off by default. Picture-in-picture and iPhone's system fullscreen show the original picture.
+
+## 1.2.43 - 2026-10-28
+
+### Added
+
+- Desktop player: a 下载 button between 换源 and 更多 (not shown on phones and tablets). 下载本集（MP4） downloads the current episode's segments (four at a time, with retries), removes ad segments as playback does, decrypts AES-128 segments and saves one MP4 named after the title and episode. TS streams are converted with mux.js 7.1.0 (Apache-2.0, `libs/mux-mp4.min.js`, loaded only when needed), restarting the timeline at every discontinuity so the file plays straight through; fMP4 streams are joined directly. Chrome and Edge write to the chosen file while downloading; other browsers save the file when it is complete. A panel at the bottom right shows progress, size, speed and time left, and can cancel; streams mux.js cannot read (such as H.265) can be saved as TS instead. 复制视频地址 copies the m3u8 address for download tools such as IDM or N_m3u8DL-RE.
+
+## 1.2.42 - 2026-10-28
+
+### Added
+
+- Player 统计信息, modelled on YouTube's "Stats for nerds": title and episode, source and video CDN host, viewport and dropped frames, current and highest resolution, video and audio codecs, measured bitrate, volume and speed, connection speed, network activity and buffer health with one-minute graphs, segment count with average time to first byte and download time, data downloaded for this episode, ad segments removed, progress, and player versions. Open it from the right-click menu or, on any device including phones, from the player settings. It refreshes every second while open, stays open across episodes and closes with its ✕ button or Esc.
+
+### Fixed
+
+- ArtPlayer's own video info panel could not be closed: the player's tap-to-pause handler took the click on its [x] and paused the video instead. The menu entry now opens the new panel, and clicks inside either panel no longer reach play/pause, long-press speed-up or fullscreen gestures.
+
+## 1.2.41 - 2026-10-28
+
+### Changed
+
+- Player page: the recommendation section now shows Douban's "people who liked this also liked" titles for the video being played (for example 漫长的季节 → 边水往事, 狂飙, 隐秘的角落), in Douban's order. The Douban ID comes from the source, or from another source's copy of the same title when the current source lacks it, and is kept for the title so a source switch shows the same list. Titles without a Douban entry fall back to Douban's popular titles of the same genre and region (for example 中国大陆 · 犯罪). The heading says which one is shown. Recommendations no longer use a broad popularity list or the current source's latest uploads. Titles no selected source can play are still removed.
+- Douban cards for titles Douban has not rated yet (too few ratings) show a muted 暂无评分 label instead of nothing, so a missing score is not mistaken for a loading problem. With 高分优先 these titles come after all rated ones.
+
+### Fixed
+
+- Douban titles without a poster yet showed Douban's generic grey picture. When a selected source has the title, its own cover is shown instead (home page cards and player recommendations). The availability check now remembers that cover.
+
+## 1.2.40 - 2026-10-28
+
+### Changed
+
+- Search results that merge the same title from several sources now show every version on the card, by category and best first (for example `HD · 正片 · TC`), instead of only the first source's note.
+- The 来源 list of a merged result tags each source with its version (HD, 正片, 更新TCV2…), clear versions first and camera copies highlighted; the player's 换源 list shows the same tags.
+- Quick play prefers clear versions: 4K/蓝光/1080P, then HD, then 正片 and other notes, then TC/TS/抢先 copies; within a version the most reliable source wins. A copy being watched still comes first so playback resumes. When the first answer is a TC/TS copy, quick play waits up to 3 seconds for slower sources to offer a clear one, and automatic retries follow the same order.
+
+## 1.2.39 - 2026-10-28
+
+### Changed
+
+- Pages load much faster: Tailwind classes are now prebuilt into `css/tailwind.css` (about 28 KB) instead of being compiled in the browser by a 407 KB runtime on every visit. On a throttled phone, first paint on the home page drops from about 1.3 s to 0.34 s and on the player page from about 1.16 s to 0.31 s; script time on the home page drops from 418 ms to 48 ms. Rendering is unchanged, verified element by element against the previous version. Run `npm run build:css` after changing Tailwind classes; `npm test` reports a stale file.
+- About page: the header now matches the rest of the site (brand mark, centred title, home button) instead of squeezing the logo and title together on phones.
+
+### Fixed
+
+- The offline page (shown when the network is unavailable) had no styles because it never loaded Tailwind; it now renders as designed.
+
+## 1.2.38 - 2026-10-28
+
+### Changed
+
+- Douban filter: shorter region labels, using the short region names that Douban's recommend API also accepts.
+
+## 1.2.37 - 2026-10-28
+
+### Added
+
+- Daily source check-up in the browser, measured from the viewer's own network. Once a day the home page quietly searches each built-in source (and selected custom ones), keeps a short history, and shows a status dot next to each source in Settings. A selected source that has switched off keyword search (two days) or failed three days in a row is stopped automatically. When the stopped source has a healthy mirror of the same network, the mirror takes its place. Built-in sources that stay healthy and are not mirrors of a selected one are suggested. Every action can be undone from a notice in Settings.
+- Sources are ranked by recent health and real playback quality (time to first frame, stalls) for quick play and for the source list of a grouped search result.
+- Settings → 路由器直连规则 generates OpenClash DIRECT rules (`- DOMAIN-SUFFIX,域名,DIRECT`) for source APIs, video CDNs, poster hosts and Douban, ready to paste into OpenClash custom rules. CDN and image domains are learned from search results and played segments, because they rotate often (for example lzcdn28 → lzcdn29). Adult sources are listed in a separate section.
+- `npm run evaluate:sources` (`scripts/evaluate-sources.mjs`) evaluates every built-in source plus optional candidates: search hit rate on six popular titles, latency, library size, last update, playlist and segment reachability, and ad breaks.
+
+### Changed
+
+- Source list review (October 2026): 卧龙, 飘零, 豆瓣资源 and 新浪 are removed. They no longer answer keyword searches (an anti-bot page, a Cloudflare challenge, "forbids keyword search", "server busy"). 非凡影视, 暴风资源 and 360资源 are added.
+- Default sources are now 影视工厂, 非凡影视, 暴风资源, 极速资源 and 无尽资源. Existing users keep their choices: removed sources are dropped and the new defaults are added once.
+- 极速, 虎牙, 光速, 金鹰, 红牛 and 豪华 are mirrors of one network (same catalogue and IDs, different CDNs). They are marked 同源 in Settings, and only one of them is selected by default.
+- Opening a Douban recommendation no longer forces 豆瓣资源 (or any source) into the selection unless no searchable source is selected at all.
+
+## 1.2.36 - 2026-10-28
+
+### Added
+
+- Douban recommendations hide titles that no selected source can play. Each card is checked in the background, source by source: the title must match, the release year may differ by at most one, the kind must fit (a film is not a same-name short drama), and the source must list a direct video URL. Results are cached (found: 3 days, missing: 6 hours). A note shows how many were hidden, with a button to show them dimmed, and the filter view loads another page when too few remain. The same check removes unplayable Douban items from the player page's 同类型推荐.
+- Player page synopsis shows the Douban rating with a link to the Douban page, using the Douban ID and score that sources already provide.
+- Player page header matches the home page and has a search box (an icon that expands on narrow screens) that opens search results without going back first.
+
+### Changed
+
+- Broken covers fall back to the same title's cover from another source, then to the Douban poster (looked up once by Douban ID and cached), instead of a grey placeholder. This matters for sources whose image host no longer resolves.
+- Recommendation cards and Douban cards only show a rating that comes from Douban. Sources' own scores (often 1.0 or 10.0 placeholders) and "暂无" badges are gone.
+- Long cast lists are clamped to two lines with an expand button.
+- On phones, 同系列作品 and 同类型推荐 scroll horizontally, which roughly halves the page length.
+- The 选集 button in the info bar is hidden on wide screens, where the episode column is already beside the player.
+
+### Fixed
+
+- Player errors no longer show the loading spinner on top of the error text, and on phones the error message and buttons fit inside the small player.
+
+## 1.2.35 - 2026-10-28
+
+### Changed
+
+- The home page opens straight onto content. The large logo, tagline and "FREE" badge are replaced by a slim sticky top bar: brand on the left (click to return home), the search box in the middle, and History and Settings on the right. The bar stays visible while scrolling, so you can search from anywhere on the page.
+- Recent searches appear in a dropdown under the search box when it is focused, and close when you type, search, press Esc or click elsewhere. On phones the dropdown spans the full width.
+- On phones, 继续观看 is a horizontal swipe row instead of a stack of full-width cards, so recommendations start near the top of the screen.
+
+## 1.2.34 - 2026-10-27
+
+### Added
+
+- Home page Douban section has a 筛选 panel that combines genre, region, year or decade, and sort (综合排序 / 近期热度 / 最新上映 / 高分优先), for example 欧美 + 2026 + 高分优先. TV adds 电视剧 / 综艺 as a format with its own genres. Results load 24 at a time with 加载更多, cards show year and region, and the chosen filters are remembered. Picking a quick tag returns to the tag view. It uses the same recommend API as Douban's own explore page, through the site proxy.
+- Search results have a filter and sort bar: kind (电影 / 剧集 / 动漫 / 综艺 / 纪录片 / 短剧, with counts), year, region, and sort by relevance, newest year, rating or most recently updated. Kinds and regions are normalised across sources ("国产动漫" and "中国动漫", "大陆" and "中国大陆"), and genre-only type names fall back to the episode count. Cards show the rating when a source provides one.
+
+### Changed
+
+- Search results are ordered by relevance instead of alphabetically: exact titles first, then titles starting with the query, shorter titles before long spin-offs, then newer releases.
+- Search card buttons no longer wrap or get cut off in the four-column layout. "查看来源" is now "来源", and long source names are truncated.
+
+## 1.2.33 - 2026-10-27
+
+### Fixed
+
+- Titles containing an apostrophe (for example "Grey's Anatomy") no longer break the episode buttons in the detail dialog or the entries in the viewing history. Values in these inline handlers are now encoded as JavaScript literals, so a title returned by a source can no longer inject script.
+- Detail fields from sources (type, year, area, director, actors, remarks, synopsis) are reduced to plain text and escaped before display instead of being inserted as raw HTML.
+- Playback that breaks off mid-episode (a segment that keeps failing, a dropped connection, a decoding error) is now recovered: network errors retry with backoff (1, 2, 4, 8 s), media errors are repaired, and after repeated failures a small notice offers retry or switching sources instead of an endless spinner. Reconnecting to the network retries automatically.
+- Switching sources no longer stores "未知视频" as the current title.
+
+### Changed
+
+- Ad filtering now removes ad breaks spliced into playlists: short runs of segments between discontinuity markers that come from another host or directory, or have a different file-name pattern. Ambiguous playlists are left untouched, and discontinuity markers are kept, because deleting them (the previous behaviour) left the ads in place and could scramble timestamps.
+- Search fetches at most 10 result pages per source, three at a time, instead of up to 50 pages at once, to avoid rate limiting by sources and needless proxy requests. Background lookups in the source picker stop when the dialog closes.
+
+## 1.2.32 - 2026-10-27
+
+### Changed
+
+- The footer shows the release number together with the build time, for example "版本: v1.2.32（2026-10-27 16:30）", including when the update check fails.
+
+## 1.2.31 - 2026-10-27
+
+### Added
+
+- Keyboard shortcuts: Space/K play-pause, J/L ±10 s, M mute, N/P next/previous episode, [ / ] speed, 0–9 jump to 0–90%, W web fullscreen, and holding → plays at 3x until released (a short press still seeks +5 s). Press ? for a shortcut help panel, also reachable from the settings panel on desktop. Volume, speed and mute changes show their new value. Browser shortcuts with Ctrl/Cmd are left alone.
+- Touch: double-tap the left or right third of the video to seek ±10 s; the middle plays or pauses. In mobile fullscreen, a horizontal swipe seeks with a time preview (up to two minutes per screen width), and long-press 3x speed now works there too.
+
+### Fixed
+
+- Seeking (dragging the progress bar, swiping or jumping by keyboard) no longer jumps back to the last saved progress point when the video buffers again. Saved progress is now restored only once per load.
+- Long-press speed works after Artplayer moves the player into its fullscreen layer, and a swipe cancels a pending long press.
+- The player's theme color matches the site theme. The episode counter appears once, in the info bar, including the episode name.
+
+## 1.2.30 - 2026-10-27
+
+### Added
+
+- Skip intro and outro per title: in the player settings panel (also in fullscreen), mark "片头结束" and "片尾开始" while watching. Every episode of that title then skips the intro and moves on at the outro. The outro is stored as time before the end, so it fits episodes of different lengths, and the feature can be switched off.
+- The next episode's playlist, init segment and first segment are fetched during the last minute of an episode, so switching starts faster. On data-saver or low-resource devices only the playlists are fetched.
+- Desktop playback offers web fullscreen (网页全屏). Touch devices keep a single fullscreen path.
+- On screens 1280px and wider, series show an always-visible episode column beside a larger player.
+
+### Fixed
+
+- Skipping, preloading and the next-episode countdown wait for the new episode's metadata, so the previous episode's position can no longer skip an extra episode or flash the countdown during a switch.
+
+## 1.2.29 - 2026-10-27
+
+### Added
+
+- An in-player episode list (选集) opens from the control bar and from mobile fullscreen, so episodes can be picked without leaving fullscreen. Variety-show episodes named by date or title show their names; plain numbered names show just the number.
+- A visible speed (倍速) button sits in the control bar, and the chosen speed is remembered across episodes, reloads and titles. The temporary long-press 3x speed is not remembered.
+- During the last seconds of an episode a card shows the next episode with a countdown, Play now and Cancel. Cancel stops the automatic next episode for that episode.
+
+### Fixed
+
+- Switching episodes quickly no longer mutes playback or shows the "已静音自动播放" notice. Only a real autoplay-policy block mutes.
+- On touch screens a single tap shows or hides the controls and a double tap plays or pauses, instead of a single tap pausing.
+- Shortcut hints appear centered over the video, including in fullscreen, and show the actual play state.
+- The left arrow key in the first five seconds returns to the start.
+
 ## 1.2.28 - 2026-10-12
 
 ### Added

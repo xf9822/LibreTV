@@ -89,7 +89,8 @@
     async function discover(session) {
         const selected = read('selectedAPIs', DEFAULT_SELECTED_APIS);
         const protectedContent = localStorage.getItem('yellowFilterEnabled') === 'true';
-        const sources = [...new Set([session.history?.sourceName, session.request.source, ...selected].filter(Boolean))]
+        const ranked = window.SourceAutopilot ? window.SourceAutopilot.rank(selected) : selected;
+        const sources = [...new Set([session.history?.sourceName, session.request.source, ...ranked].filter(Boolean))]
             .filter(source => !protectedContent || !(API_SITES[source]?.adult || (source.startsWith('custom_') && getCustomApiInfo(source.slice(7))?.isAdult)));
         let next = 0;
         await Promise.all(Array.from({ length: Math.min(4, sources.length) }, async () => {
@@ -116,7 +117,8 @@
             const button = document.createElement('button');
             const info = identity(item);
             button.type = 'button';
-            button.textContent = `${info.title} · ${info.year || '年份未知'} · ${info.kind === 'tv' ? '剧集' : info.kind === 'movie' ? '电影' : '类型待确认'}${versions ? '' : ' · ' + name(item.source_code)}`;
+            const version = versions ? '' : window.LibreExperience?.versionLabel(item) || '';
+            button.textContent = `${info.title} · ${info.year || '年份未知'} · ${info.kind === 'tv' ? '剧集' : info.kind === 'movie' ? '电影' : '类型待确认'}${versions ? '' : ' · ' + name(item.source_code)}${version ? ' · ' + version : ''}`;
             button.onclick = () => { session.forced = item; session.choiceResolve?.(item); };
             list.appendChild(button);
         }
@@ -205,6 +207,11 @@
             if (item && request.year && request.kind) {
                 await new Promise(resolve => setTimeout(resolve, 280));
                 item = window.LibreExperience?.chooseCandidate(session.items, request, read('viewingHistory', [])) || item;
+                // A TC/TS copy answered first: give slower sources a moment to offer a clear one.
+                if ((window.LibreExperience?.versionRank(item) ?? 3) < 2) {
+                    await Promise.race([session.discovery, new Promise(resolve => setTimeout(resolve, 3000))]);
+                    item = window.LibreExperience?.chooseCandidate(session.items, request, read('viewingHistory', [])) || item;
+                }
             }
             if (!item) {
                 await session.discovery;
@@ -232,7 +239,8 @@
                 return Boolean(selection);
             } catch (error) {
                 await session.discovery;
-                item = session.items.find(candidate => !session.tried.has(`${candidate.source_code}:${candidate.vod_id}`));
+                const untried = session.items.filter(candidate => !session.tried.has(`${candidate.source_code}:${candidate.vod_id}`));
+                item = window.LibreExperience?.chooseCandidate(untried, session.request, read('viewingHistory', [])) || untried[0];
                 if (session.retries >= 2 || session.manual) item = null;
                 if (item) { session.retries++; setStatus(`正在尝试其他资源（${session.retries}/2）…`); }
                 else { session.manual = true; setStatus(error.message + '，请选择资源或返回首页'); }
@@ -269,7 +277,8 @@
             // A single movie needs no cross-source episode mapping.
             const saved = current.detail.episodes.length === 1 && state.request.kind === 'movie' ? { ...resume, singleMovie: true } : resume;
             let succeeded = false;
-            const options = [...state.items].sort((a,b) => (window.LibreExperience?.qualityScore(b.source_code) || 0) - (window.LibreExperience?.qualityScore(a.source_code) || 0));
+            const version = item => Math.floor(window.LibreExperience?.versionRank(item) ?? 3);
+            const options = [...state.items].sort((a,b) => version(b) - version(a) || (window.LibreExperience?.qualityScore(b.source_code) || 0) - (window.LibreExperience?.qualityScore(a.source_code) || 0));
             for (const item of options) {
                 const key = `${item.source_code}:${item.vod_id}`;
                 if (state.tried.has(key) || state.retries >= 2) continue;

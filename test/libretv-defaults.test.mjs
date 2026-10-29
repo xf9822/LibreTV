@@ -87,9 +87,6 @@ test('verified customer API sources are available and invalid placeholders are r
   assert.equal(window.API_SITES.maoyan.api, 'https://api.maoyanapi.top/api.php/provide/vod');
   assert.equal(window.API_SITES.rycj.api, 'https://cj.rycjapi.com/api.php/provide/vod');
   assert.equal(window.API_SITES.huya.api, 'https://www.huyaapi.com/api.php/provide/vod');
-  assert.equal(window.API_SITES.xinlang.api, 'https://api.xinlangapi.com/xinlangapi.php/provide/vod');
-  assert.equal(window.API_SITES.wolong.api, 'https://wolongzyw.com/api.php/provide/vod');
-  assert.equal(window.API_SITES.dbzy.api, 'https://dbzy.tv/api.php/provide/vod');
   assert.equal(window.API_SITES.mdzy.api, 'https://www.mdzyapi.com/api.php/provide/vod');
   assert.equal(window.API_SITES.zuid.api, 'https://api.zuidapi.com/api.php/provide/vod');
   assert.equal(window.API_SITES.baidu.api, 'https://api.apibdzy.com/api.php/provide/vod');
@@ -98,7 +95,6 @@ test('verified customer API sources are available and invalid placeholders are r
   assert.equal(window.API_SITES.jinying.api, 'https://jinyingzy.com/api.php/provide/vod');
   assert.equal(window.API_SITES.hongniu.api, 'https://www.hongniuzy2.com/api.php/provide/vod');
   assert.equal(window.API_SITES.hhzy.api, 'https://hhzyapi.com/api.php/provide/vod');
-  assert.equal(window.API_SITES.p2100.api, 'https://p2100.net/api.php/provide/vod');
   assert.equal(window.API_SITES.uku.api, 'https://api.ukuapi88.com/api.php/provide/vod');
   assert.equal(window.API_SITES.ckzy.adult, true);
   assert.equal(window.API_SITES.ckzy.api, 'https://www.ckzy1.com/api.php/provide/vod');
@@ -116,7 +112,16 @@ test('verified customer API sources are available and invalid placeholders are r
   assert.equal(window.API_SITES.siwa.api, 'https://siwazyw.tv/api.php/provide/vod');
   assert.equal(window.API_SITES.qiqi, undefined);
   assert.equal(window.API_SITES.testSource, undefined);
-  assert.deepEqual(Array.from(window.DEFAULT_SELECTED_APIS), ['ysgc', 'jszy', 'wujin', 'maoyan']);
+  // 2026-10: these no longer answer keyword searches (anti-bot page, Cloudflare challenge, "forbids keyword search", "server busy").
+  for (const removed of ['wolong', 'p2100', 'dbzy', 'xinlang']) assert.equal(window.API_SITES[removed], undefined, removed);
+  assert.equal(window.API_SITES.ffzy.api, 'https://api.ffzyapi.com/api.php/provide/vod');
+  assert.equal(window.API_SITES.bfzy.api, 'https://bfzyapi.com/api.php/provide/vod');
+  assert.equal(window.API_SITES.zy360.api, 'https://360zy.com/api.php/provide/vod');
+  // Mirrors of one network share a family so the settings can say "pick one".
+  const jisu = Object.keys(window.API_SITES).filter(key => window.API_SITES[key].family === 'jisu');
+  assert.deepEqual(jisu, ['jszy', 'huya', 'guangsu', 'jinying', 'hongniu', 'hhzy']);
+  assert.deepEqual(Array.from(window.DEFAULT_SELECTED_APIS), ['ysgc', 'ffzy', 'bfzy', 'jszy', 'wujin']);
+  assert.equal(window.DEFAULT_SELECTED_APIS.filter(key => window.API_SITES[key].family === 'jisu').length, 1);
 });
 
 test('Docker image supports optional outbound proxy without changing default startup', async () => {
@@ -1083,7 +1088,9 @@ test('player cast, menu hotzone, fullscreen, and duplicate controls are wired', 
   assert.doesNotMatch(player, /art\.video\.addEventListener\('dblclick'/);
 
   assert.match(player, /function toggleFullscreenMode/);
-  assert.match(player, /e\.altKey && e\.key === 'Enter'/);
+  const enhancements = await readProjectFile('js/player-enhancements.js');
+  assert.match(enhancements, /if \(event\.altKey\) \{\n\s*if \(key === 'Enter'\) return \{ type: 'fullscreen' \}/);
+  assert.match(player, /window\.PlayerEnhancements\.shortcutAction\(e\)/);
   assert.match(player, /function maybeLockLandscapeOrientation/);
   assert.match(player, /function unlockLandscapeOrientation/);
   assert.match(player, /screen\.orientation\.lock\('landscape'\)/);
@@ -1143,7 +1150,9 @@ test('player cast, menu hotzone, fullscreen, and duplicate controls are wired', 
   assert.match(player, /flip:\s*false/);
   assert.match(player, /playbackRate:\s*true/);
   assert.match(player, /fullscreen:\s*true/);
-  assert.match(player, /fullscreenWeb:\s*false/);
+  // Web fullscreen is offered on desktop only; touch devices keep a single fullscreen path.
+  assert.match(player, /fullscreenWeb:\s*!isMobilePlaybackDevice\(\)/);
+  assert.match(playerStyles, /\.player-touch-device \.art-control-fullscreenWeb/);
 });
 
 test('first-run guidance and diagnostics page support public self-hosting', async () => {
@@ -1233,15 +1242,34 @@ test('release metadata is bumped for this update', async () => {
 
   const changelog = await readProjectFile('CHANGELOG.md');
 
-  assert.equal(packageJson.version, '1.2.28');
-  assert.equal(lockJson.version, '1.2.28');
-  assert.equal(lockJson.packages[''].version, '1.2.28');
-  assert.match(config, /version:\s*'1\.2\.28'/);
-  assert.match(serviceWorker, /const APP_VERSION = '202610121036'/);
+  assert.equal(packageJson.version, '1.2.47');
+  assert.equal(lockJson.version, '1.2.47');
+  assert.equal(lockJson.packages[''].version, '1.2.47');
+  assert.match(config, /version:\s*'1\.2\.47'/);
+  assert.match(serviceWorker, /const APP_VERSION = '202610281330'/);
   assert.match(serviceWorker, /'\/js\/player-recommendations\.js'/);
   assert.match(serviceWorker, /'\/js\/mobile-fullscreen\.js'/);
   assert.match(serviceWorker, /'\/css\/theme\.css'/);
   assert.match(serviceWorker, /'\/js\/source-speed\.js'/);
+  assert.match(changelog, /## 1\.2\.47 - 2026-10-28[\s\S]*?two progress bars/);
+  assert.match(changelog, /## 1\.2\.46 - 2026-10-28[\s\S]*?README rewritten/);
+  assert.match(changelog, /## 1\.2\.45 - 2026-10-28[\s\S]*?低画质修复/);
+  assert.match(changelog, /## 1\.2\.44 - 2026-10-28[\s\S]*?FidelityFX Super Resolution/);
+  assert.match(changelog, /## 1\.2\.43 - 2026-10-28[\s\S]*?下载本集/);
+  assert.match(changelog, /## 1\.2\.42 - 2026-10-28[\s\S]*?Stats for nerds/);
+  assert.match(changelog, /## 1\.2\.41 - 2026-10-28[\s\S]*?people who liked this also liked/);
+  assert.match(changelog, /## 1\.2\.40 - 2026-10-28[\s\S]*?every version/);
+  assert.match(changelog, /## 1\.2\.39 - 2026-10-28[\s\S]*?prebuilt/);
+  assert.match(changelog, /## 1\.2\.38 - 2026-10-28[\s\S]*?shorter region labels/);
+  assert.match(changelog, /## 1\.2\.37 - 2026-10-28[\s\S]*?Daily source check-up in the browser/);
+  assert.match(changelog, /## 1\.2\.36 - 2026-10-28[\s\S]*?hide titles that no selected source can play/);
+  assert.match(changelog, /## 1\.2\.35 - 2026-10-28[\s\S]*?slim sticky top bar/);
+  assert.match(changelog, /## 1\.2\.34 - 2026-10-27[\s\S]*?combines genre, region, year or decade/);
+  assert.match(changelog, /## 1\.2\.33 - 2026-10-27[\s\S]*?removes ad breaks spliced into playlists/);
+  assert.match(changelog, /## 1\.2\.32 - 2026-10-27[\s\S]*?release number together with the build time/);
+  assert.match(changelog, /## 1\.2\.31 - 2026-10-27[\s\S]*?Keyboard shortcuts/);
+  assert.match(changelog, /## 1\.2\.30 - 2026-10-27[\s\S]*?Skip intro and outro/);
+  assert.match(changelog, /## 1\.2\.29 - 2026-10-27[\s\S]*?in-player episode list/);
   assert.match(changelog, /## 1\.2\.24 - 2026-10-10[\s\S]*?Douban recommendations load once/);
   assert.match(changelog, /## 1\.2\.23 - 2026-10-10[\s\S]*?real media segment/);
   assert.match(changelog, /## 1\.2\.22 - 2026-10-10[\s\S]*?modern theme/);
@@ -1309,4 +1337,15 @@ test('version checker falls back to maintained Raw and keeps local version durin
   assert.equal(offlineResult.current, '202609230002');
   assert.equal(offlineResult.latest, null);
   assert.equal(offlineResult.hasUpdate, null);
+});
+
+test('footer version shows the release number with the build time', async () => {
+  const checker = await loadVersionChecker(async () => ({ ok: false }));
+  // Without SITE_CONFIG the build time is shown alone.
+  assert.equal(checker.formatVersionLabel('2026-10-27 14:00'), '2026-10-27 14:00');
+  checker.SITE_CONFIG = { version: '9.9.9' };
+  assert.equal(checker.formatVersionLabel('2026-10-27 14:00'), 'v9.9.9（2026-10-27 14:00）');
+  assert.equal(checker.formatVersionLabel(''), 'v9.9.9');
+  checker.SITE_CONFIG = { version: '<img onerror=x>' };
+  assert.equal(checker.formatVersionLabel('2026-10-27 14:00'), '2026-10-27 14:00');
 });

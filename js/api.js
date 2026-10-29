@@ -220,6 +220,9 @@ async function handleApiRequest(url) {
                         director: videoDetail.vod_director,
                         actor: videoDetail.vod_actor,
                         remarks: videoDetail.vod_remarks,
+                        // 资源站自带的豆瓣条目（0 表示未关联）
+                        doubanId: Number(videoDetail.vod_douban_id) > 0 ? Number(videoDetail.vod_douban_id) : 0,
+                        doubanScore: videoDetail.vod_douban_score || '',
                         // 添加源信息
                         source_name: sourceCode === 'custom' ? '自定义源' : API_SITES[sourceCode].name,
                         source_code: sourceCode

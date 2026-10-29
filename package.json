@@ -1,7 +1,7 @@
 {
   "name": "libretv",
   "type": "module",
-  "version": "1.2.28",
+  "version": "1.2.47",
   "private": true,
   "description": "免费在线视频搜索与观看平台",
   "author": "bestZwei",
@@ -10,7 +10,9 @@
     "dev": "nodemon server.mjs",
     "start": "node server.mjs",
     "test": "node --test",
-    "smoke:browser": "node scripts/smoke-browser.mjs"
+    "smoke:browser": "node scripts/smoke-browser.mjs",
+    "evaluate:sources": "node scripts/evaluate-sources.mjs",
+    "build:css": "tailwindcss -c tailwind.config.cjs -i css/tailwind.src.css -o css/tailwind.css --minify"
   },
   "dependencies": {
     "axios": "^1.9.0",
@@ -20,6 +22,7 @@
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "tailwindcss": "3.4.16"
   }
 }

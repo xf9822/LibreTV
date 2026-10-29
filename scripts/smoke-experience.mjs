@@ -40,14 +40,14 @@ try {
  assert.match(await page.locator('#results').innerText(),/2 个来源/);
  assert.equal(delayed,true);
  await page.screenshot({path:'/tmp/libretv-experience-mobile-search.png',fullPage:true});
- const details=page.locator('#results button').filter({hasText:'查看来源'});
+ const details=page.locator('#results button').filter({hasText:/^来源$/});
  await details.focus();await details.click();
  assert.equal(await page.locator('#modalContent .grouped-source-button').count(),2);
  await page.keyboard.press('Escape');
  await page.locator('#modal').waitFor({state:'hidden'});
  assert.equal(await details.evaluate(node=>document.activeElement===node),true);
  await page.locator('#results button').filter({hasText:'稍后看'}).click();
- await page.locator('.lt-search-home').click();
+ await page.locator('.lt-topbar-brand').click();
  assert.match(await page.locator('#watchLaterList').innerText(),/体验测试电影/);
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  const other=await context.newPage();await other.goto(base);

@@ -17,30 +17,13 @@
     <link rel="apple-touch-icon" href="image/icon-192.png">
     <link rel="manifest" href="manifest.json">
     
-    <script src="libs/tailwindcss.min.js"></script>
     <link rel="stylesheet" href="css/modals.css">
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="css/index.css">
     <link rel="stylesheet" href="css/theme.css">
+    <link rel="stylesheet" href="css/tailwind.css">
 </head>
 <body class="page-bg text-white">
-    <!-- 左上角：观看历史 -->
-    <button onclick="toggleHistory(event)" class="lt-fab lt-fab-left" aria-label="观看历史" title="观看历史">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-        </svg>
-        <span class="lt-fab-label">历史</span>
-    </button>
-
-    <!-- 右上角：设置 -->
-    <button onclick="toggleSettings(event)" class="lt-fab lt-fab-right" aria-label="打开设置" title="设置">
-        <span class="lt-fab-label">设置</span>
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-        </svg>
-    </button>
-
     <!-- 历史记录面板 -->
     <div id="historyPanel" class="history-panel fixed left-0 top-0 h-full p-5 z-40 transform -translate-x-full transition-transform duration-300" aria-label="观看历史" aria-hidden="true">
         <div class="lt-panel-head lt-panel-head-left">
@@ -76,6 +59,8 @@
             <!-- 数据源设置区域 -->
             <div class="lt-card">
                 <label class="lt-card-title">数据源设置</label>
+                <!-- 每日自动体检的结果：自动停用 / 推荐启用 -->
+                <div id="sourceAutopilotNotice" class="source-autopilot-notice" hidden></div>
 
                 <!-- 批量操作按钮 -->
                 <div class="flex flex-wrap gap-2 mb-3">
@@ -124,6 +109,13 @@
                         <button onclick="cancelAddCustomApi()" class="bg-[#444] hover:bg-[#555] text-white px-3 py-1 rounded text-xs">取消</button>
                     </div>
                 </div>
+            </div>
+
+            <!-- 路由器直连规则 -->
+            <div class="lt-card">
+                <label class="lt-card-title">路由器直连规则</label>
+                <p class="text-xs text-gray-500 mb-3">生成 OpenClash 可直接粘贴的直连（DIRECT）规则：资源站、视频 CDN、海报图片和豆瓣的域名。视频 CDN 域名会在搜索和播放时自动收集，隔段时间重新生成一次即可。</p>
+                <button type="button" onclick="showClashRules()" class="lt-btn lt-btn-sm">生成 OpenClash 直连规则</button>
             </div>
 
             <!-- 内容过滤设置区域 -->
@@ -187,76 +179,76 @@
         </div>
     </div>
 
-    <main class="lt-main container mx-auto px-4 flex flex-col min-h-screen">
-        <div class="flex-1 flex flex-col">
-            <!-- 网站标志和口号 -->
-            <header class="lt-hero">
-                <div class="lt-badge">
-                    <span class="lt-badge-dot">FREE</span>
-                    无广告 · 免注册 · 多源聚合
-                </div>
-                <div>
-                    <a href="#" onclick="resetToHome(); return false;" class="lt-brand">
-                        <span class="lt-brand-mark" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M8 5.14v13.72a1 1 0 001.52.85l11.02-6.86a1 1 0 000-1.7L9.52 4.29A1 1 0 008 5.14z"></path>
-                            </svg>
-                        </span>
-                        <h1 class="lt-brand-name gradient-text">LibreTV</h1>
-                    </a>
-                </div>
-                <p class="lt-tagline"><strong>自由观影</strong>，畅享精彩</p>
-            </header>
+    <!-- 顶部导航：品牌（返回首页）· 搜索 · 历史 / 设置 -->
+    <header class="lt-topbar">
+        <div class="lt-topbar-inner">
+            <a href="/" onclick="resetToHome(); return false;" class="lt-topbar-brand" title="返回首页" aria-label="LibreTV 首页">
+                <span class="lt-brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5.14v13.72a1 1 0 001.52.85l11.02-6.86a1 1 0 000-1.7L9.52 4.29A1 1 0 008 5.14z"></path>
+                    </svg>
+                </span>
+                <h1 class="lt-topbar-name gradient-text">LibreTV</h1>
+            </a>
 
-            <div id="searchArea" class="flex-1 flex flex-col items-center">
-                <div class="lt-search-wrap">
-                    <div class="lt-search">
-                        <!-- 首页按钮 -->
-                        <button onclick="resetToHome()" class="lt-search-home" aria-label="返回首页" title="返回首页">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1v-9.5z"></path>
+            <div id="searchArea" class="lt-search-wrap">
+                <div class="lt-search">
+                    <div class="lt-search-field">
+                        <svg class="lt-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"></path>
+                        </svg>
+                        <!-- 搜索输入 -->
+                        <input type="text"
+                               id="searchInput"
+                               class="lt-search-input"
+                               placeholder="搜索电影、剧集、动漫…"
+                               autocomplete="off"
+                               aria-label="视频搜索框"
+                               oninput="toggleClearButton()">
+                        <!-- 清空按钮 -->
+                        <button id="clearSearchInput"
+                                class="lt-search-clear hidden"
+                                onclick="clearSearchInput()"
+                                aria-label="清空搜索框"
+                                title="清空搜索框">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                             </svg>
-                            <span>首页</span>
-                        </button>
-                        <div class="lt-search-field">
-                            <svg class="lt-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"></path>
-                            </svg>
-                            <!-- 搜索输入 -->
-                            <input type="text"
-                                   id="searchInput"
-                                   class="lt-search-input"
-                                   placeholder="搜索你喜欢的电影、剧集、动漫..."
-                                   autocomplete="off"
-                                   aria-label="视频搜索框"
-                                   oninput="toggleClearButton()">
-                            <!-- 清空按钮 -->
-                            <button id="clearSearchInput"
-                                    class="lt-search-clear hidden"
-                                    onclick="clearSearchInput()"
-                                    aria-label="清空搜索框"
-                                    title="清空搜索框">
-                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                        <!-- 搜索按钮 -->
-                        <button onclick="search()" class="lt-search-submit" aria-label="搜索按钮">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"></path>
-                            </svg>
-                            <span>搜索</span>
                         </button>
                     </div>
-
-                    <!-- 最近搜索记录 -->
-                    <div id="recentSearches" class="flex flex-wrap gap-2" aria-label="最近搜索记录">
-                        <!-- 这里会动态插入最近的搜索记录 -->
-                    </div>
+                    <!-- 搜索按钮 -->
+                    <button onclick="search()" class="lt-search-submit" aria-label="搜索按钮">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"></path>
+                        </svg>
+                        <span>搜索</span>
+                    </button>
                 </div>
+
+                <!-- 最近搜索：聚焦搜索框时下拉显示 -->
+                <div id="recentSearches" class="lt-recent" aria-label="最近搜索记录"></div>
             </div>
 
+            <div class="lt-topbar-actions">
+                <button onclick="toggleHistory(event)" class="lt-topbar-btn" aria-label="观看历史" title="观看历史">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span class="lt-topbar-label">历史</span>
+                </button>
+                <button onclick="toggleSettings(event)" class="lt-topbar-btn lt-topbar-settings" aria-label="打开设置" title="设置">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    <span class="lt-topbar-label">设置</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="lt-main container mx-auto px-4 flex flex-col min-h-screen">
+        <div class="flex-1 flex flex-col">
             <section id="homeEmptyGuide" class="lt-section hidden" aria-label="发现影片">
                 <p>想找点好看的？试试搜索片名，或看看热门推荐。</p>
                 <button type="button" class="lt-btn lt-btn-sm" onclick="enableHomeRecommendations()">开启热门推荐</button>
@@ -295,10 +287,20 @@
                         <div class="overflow-x-auto">
                             <div id="douban-tags" class="flex min-w-max"></div>
                         </div>
+                        <!-- 组合筛选：类型 / 地区 / 年代 / 排序 -->
+                        <div id="douban-filter-panel" class="douban-filter-panel" hidden></div>
+                    </div>
+
+                    <div id="douban-hidden-note" class="douban-hidden-note" hidden>
+                        已隐藏 <strong data-hidden-count>0</strong> 部暂无播放源的影片
+                        <button type="button" onclick="toggleDoubanUnavailable()" aria-pressed="false">显示</button>
                     </div>
 
                     <!-- 推荐内容 -->
                     <div id="douban-results" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3"></div>
+                    <div class="douban-more-wrap">
+                        <button id="douban-more" type="button" class="lt-btn lt-btn-sm" style="display: none">加载更多</button>
+                    </div>
                 </div>
             </section>
 
@@ -312,6 +314,8 @@
                             <span id="searchProgress" class="search-progress" aria-live="polite"></span>
                         </div>
                     </div>
+                    <!-- 类型 / 年份 / 地区筛选与排序 -->
+                    <div id="searchFilterBar" class="search-filter-bar" hidden></div>
                     <div id="results" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                         <!-- 结果将在这里动态生成 -->
                     </div>
@@ -447,10 +451,15 @@
     <script src="js/customer_site.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/api.js"></script>
+    <script src="js/douban-filter.js"></script>
     <script src="js/douban.js"></script>
     <script src="js/password.js"></script>
     <script src="js/search.js"></script>
+    <script src="js/search-filter.js"></script>
     <script src="js/quick-play.js"></script>
+    <script src="js/source-availability.js"></script>
+    <script src="js/source-autopilot.js"></script>
+    <script src="js/source-hosts.js"></script>
     <script src="js/experience.js"></script>
     <script src="js/episode-context.js"></script>
     <script src="js/modal-accessibility.js"></script>
