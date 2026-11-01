@@ -12,8 +12,42 @@ const CONFIG_STORAGE_KEYS = [
     'videoSearchHistory',
     'firstRunGuideSeen',
     'sourceHealthReport',
-    'sourceHealthCheckedAt'
+    'sourceHealthCheckedAt',
+    'watchLaterV1',
+    'userMovieTags',
+    'userTvTags',
+    'doubanFilterV1',
+    'autoplayEnabled',
+    'danmakuMode',
+    'videoEnhanceMode',
+    'libretvPlaybackRate',
+    'libretvSkipMarks',
+    'sourceAutopilotV1',
+    'sourceHealthHistoryV1',
+    'sourcePlaybackQualityV1',
+    'sourceBenchmarkV1'
 ];
+
+// 导入时按类型检查：格式不对的项跳过，不写进本地存储（否则页面读取时会出错）
+const isText = value => typeof value === 'string';
+const CONFIG_SHAPES = {
+    selectedAPIs: value => Array.isArray(value) && value.every(isText),
+    customAPIs: value => Array.isArray(value) && value.every(api => api && typeof api === 'object' &&
+        isText(api.url) && /^https?:\/\//i.test(api.url) && (api.name === undefined || isText(api.name)) &&
+        (api.detail === undefined || api.detail === '' || (isText(api.detail) && /^https?:\/\//i.test(api.detail)))),
+    viewingHistory: value => Array.isArray(value) && value.every(item => item && typeof item === 'object' &&
+        (item.episodeIndex === undefined || Number.isInteger(item.episodeIndex))),
+    videoSearchHistory: Array.isArray,
+    watchLaterV1: Array.isArray,
+    userMovieTags: value => Array.isArray(value) && value.every(isText),
+    userTvTags: value => Array.isArray(value) && value.every(isText)
+};
+
+function isValidConfigValue(key, text) {
+    const check = CONFIG_SHAPES[key];
+    if (!check) return true;
+    try { return check(JSON.parse(text)); } catch (error) { return false; }
+}
 
 const allowedKeys = new Set(CONFIG_STORAGE_KEYS);
 
@@ -71,9 +105,10 @@ async function validateAndMigrateConfig(config) {
     const data = {};
 
     Object.entries(config.data).forEach(([key, value]) => {
-        if (allowedKeys.has(key)) {
-            data[key] = typeof value === 'string' ? value : JSON.stringify(value);
-        }
+        if (!allowedKeys.has(key)) return;
+        const text = typeof value === 'string' ? value : JSON.stringify(value);
+        if (isValidConfigValue(key, text)) data[key] = text;
+        else migrationMessages.push(`已跳过格式不正确的 ${key}`);
     });
 
     if (!config.version && config.cfgVer === '1.0.0') {
@@ -114,3 +149,4 @@ window.collectConfigData = collectConfigData;
 window.buildConfigExport = buildConfigExport;
 window.validateAndMigrateConfig = validateAndMigrateConfig;
 window.applyConfigData = applyConfigData;
+window.isValidConfigValue = isValidConfigValue;

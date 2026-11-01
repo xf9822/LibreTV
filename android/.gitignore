@@ -1,0 +1,8 @@
+.gradle/
+build/
+app/build/
+local.properties
+# 签名密钥与密码绝不进仓库
+*.jks
+*.keystore
+keystore.properties

@@ -85,6 +85,22 @@ function rewriteUrlToProxy(targetUrl) {
     return `/proxy/${encodeURIComponent(targetUrl)}`;
 }
 
+// 代理返回的内容出现在本站域名下：上游网页或脚本不能在这里运行，也不能写 Cookie、注册
+// Service Worker。网页 / 脚本类内容改成纯文本（前端用 fetch 读取不受影响），并统一加上沙箱。
+const DROPPED_PROXY_HEADERS = new Set(['set-cookie', 'service-worker-allowed', 'clear-site-data', 'refresh', 'link', 'content-security-policy', 'x-frame-options']);
+const PROXY_SANDBOX_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+};
+function safeProxyHeader(key, value) {
+    const lowerKey = key.toLowerCase();
+    if (DROPPED_PROXY_HEADERS.has(lowerKey)) return null;
+    if (lowerKey === 'content-type' && /html|xml|javascript|ecmascript/i.test(value) && !/svg/i.test(value)) {
+        return 'text/plain; charset=utf-8';
+    }
+    return value;
+}
+
 function getRandomUserAgent() { return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]; }
 
 /**
@@ -128,7 +144,8 @@ async function fetchContentWithType(targetUrl, requestHeaders) {
         'User-Agent': getRandomUserAgent(),
         'Accept': requestHeaders['accept'] || '*/*',
         'Accept-Language': requestHeaders['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Referer': requestHeaders['referer'] || new URL(targetUrl).origin,
+        // 只用目标站自己的地址作 Referer，不把本站地址透露给上游
+        'Referer': new URL(targetUrl).origin,
     };
     Object.keys(headers).forEach(key => headers[key] === undefined || headers[key] === null || headers[key] === '' ? delete headers[key] : {});
     logDebug(`Fetching target: ${targetUrl} with headers: ${JSON.stringify(headers)}`);
@@ -299,12 +316,15 @@ export const handler = async (event, context) => {
             responseHeaders.forEach((value, key) => {
                  const lowerKey = key.toLowerCase();
                  // Exclude problematic headers and CORS headers (already added)
-                 if (!lowerKey.startsWith('access-control-') &&
+                 const safeValue = safeProxyHeader(key, value);
+                 if (safeValue !== null &&
+                     !lowerKey.startsWith('access-control-') &&
                      lowerKey !== 'content-encoding' &&
                      lowerKey !== 'content-length') {
-                     netlifyHeaders[key] = value; // Add other original headers
+                     netlifyHeaders[key] = safeValue; // Add other original headers
                  }
              });
+            Object.assign(netlifyHeaders, PROXY_SANDBOX_HEADERS);
             netlifyHeaders['Cache-Control'] = `public, max-age=${CACHE_TTL}`; // Set our cache policy
 
             return {

@@ -2,6 +2,197 @@
 
 All notable changes to this maintained LibreTV fork are documented here.
 
+## 1.2.58 - 2026-10-31
+
+### Added
+
+- Android TV app (`download/LibreTV-TV.apk`, package `io.github.wxst.libretv.tv`): the `tv` Gradle flavor of the same shell.
+  - It appears on the TV home screen with a 320×180 banner, always runs landscape and keeps the screen on.
+  - It needs only the internet permission (no casting), and it can be installed next to the phone app.
+- TV mode on the site (`js/tv-mode.js`). It turns on in the TV app (its User-Agent ends in ` TV`), in known TV browsers (Android TV, Fire TV, BRAVIA, Mi TV/Box and others), or with `?tv=1`; `?tv=0` turns it off.
+  - On pages, the direction keys move focus to the nearest button or card in that direction, inside the open panel when there is one. Focus has a large glow that is visible from the sofa, and OK clicks the focused element.
+  - Playback fills the screen as soon as it starts:
+    - OK: play / pause.
+    - Left / right: ±10 s.
+    - Up: episodes (focus lands on the current one).
+    - Down / menu: playback settings.
+    - Media keys: play, pause, rewind, fast-forward, next and previous episode.
+  - The player uses the desktop layout (no touch layer, larger danmaku), and the cast and download buttons are hidden.
+- Back key (both apps): the page handles it first through `window.LibreTVBack()`. It closes the playback settings, episodes, cast panel, dialogs, settings or history, then exits web fullscreen. Only after that does the app go back or close.
+- Download card: the settings show both 下载手机版 and 下载电视版 on Android phones, Android TV and desktop (for sideloading by USB), and highlight the one that fits the current device. iPhone keeps its home-screen hint.
+- Both apps are now 1.1.0 (versionCode 4), with the same signing key.
+
+### Fixed
+
+- The 历史 / 设置 buttons in the top bar wrapped their labels into a vertical column at widths around 960 px (for example a TV browser or a narrow window).
+
+## 1.2.57 - 2026-10-31
+
+### Added
+
+- 一键优选 (Settings → 数据源设置): every source is timed on the viewer's own network.
+  - Each source gets one search plus a short download of a real video segment (about 1 s, at most 1 MB, using the new quick mode of `SourceSpeed.probeEpisodeUrl`).
+  - The fastest 6 normal sources are then selected. Mirrors of one network keep only their fastest member, custom sources are kept, and adult sources are re-picked only when some were selected.
+  - The result lists every source's speed. 「撤销这次调整」 restores the previous selection.
+- Automatic runs:
+  - Once in the background on first visit.
+  - A weekly re-test afterwards. It only swaps a selected source that failed or is over 3× slower than an unselected one of the same kind, and says so in Settings, with undo.
+- Safeguards:
+  - If fewer than 3 sources are playable (most likely a flaky network), sources that at least answer searches fill the selection.
+  - On mobile data or Save-Data, only searches are timed.
+  - A run that reaches nothing changes nothing.
+- The settings source list is sorted by quality (measured speed, then the daily health check) and shows each source's speed. Automatic playback source choice and fallback also prefer faster sources.
+- Sources:
+  - New libraries: 爱蛋资源, 优质资源.
+  - New backup mirrors: 量子资源 (影视工厂), 无尽资源（备用）, 魔都资源（备用）, 新浪资源 (极速 family).
+  - Adult: 百万 and 丝袜 were removed (connections reset). Added 奥斯卡, 辣椒, 乐播, 奶香, 鲨鱼, 森林 and 杏吧, plus backup mirrors for 黄色仓库 and 玉兔. Each was checked by downloading a real video segment. souav, 滴滴 and 黑料 answer searches but their videos fail, so they are not added.
+  - The defaults migration (`20261031-sources-v4`) drops removed sources from saved selections. It no longer re-adds the defaults for users who have optimised.
+
+### Fixed
+
+- Danmaku:
+  - HTML entities such as `&#128014;` are decoded (🐎).
+  - Platform emote codes such as `[狗头]`, `[吃瓜]`, `[呆住]`, `[马年大吉]` and two-part `[打卡-打][打卡-卡]` become matching emoji (about 80 known codes plus keyword hints). Unknown codes are dropped, and comments left empty are skipped. Plain brackets like `[0]` stay.
+- Speed test: a sample that arrived in a single burst (small file or cache) reported impossible rates such as 333 MB/s. It is now timed from the request.
+- The settings button to the diagnostics page is now labelled 诊断页. The new 一键优选 button sits in the source settings.
+
+## 1.2.56 - 2026-10-31
+
+### Fixed
+
+- Android app 1.0.2:
+  - On Android 15, apps are drawn edge to edge, so the site's top bar sat under the status-bar icons, and the bottom could hide behind the navigation bar or keyboard. The page now leaves room for the status bar, navigation bar, display cutout and keyboard. Fullscreen video still uses the whole screen.
+  - The TV search (SSDP `M-SEARCH`) is sent on every LAN network interface instead of only the system default. Some phones route multicast to mobile data or a VPN, so TVs on the same Wi-Fi never heard the search. Mobile-data and VPN interfaces are skipped.
+  - Same signing key, so it installs over 1.0.1.
+- When no device is found, the cast panel now says that Apple TV and Mac speak only AirPlay, not DLNA. The README FAQ says the same and suggests an open-source DLNA receiver for testing on a Mac.
+
+## 1.2.55 - 2026-10-31
+
+### Changed
+
+- Android app 1.0.1 asks for two permissions instead of four. It keeps `INTERNET` (the site, playback and cast commands) and `CHANGE_WIFI_MULTICAST_STATE` (finding TVs on Wi-Fi). `ACCESS_NETWORK_STATE` and `ACCESS_WIFI_STATE` were declared but never used, so they are gone. Both remaining permissions are normal install-time permissions with no prompts. Same signing key, so it installs over 1.0.0. The README and `android/README.md` list the permissions and why they are needed.
+
+## 1.2.54 - 2026-10-31
+
+### Added
+
+- Android app (`android/`, published as `download/LibreTV.apk`, about 80 KB). It is a thin shell: a full-screen WebView opens your own LibreTV site, so site updates reach the app without reinstalling. The site address is entered once on first launch and can be changed later from the site's settings. It adds what an Android browser cannot do:
+  - **Casting to a TV (DLNA)**. The player shows a 投屏 button. It finds TVs and boxes on the same Wi-Fi that accept DLNA (乐播, built-in TV casting, most Xiaomi / Huawei / Hisense / TCL / Skyworth sets) via SSDP, and tells the chosen one to play the episode over SOAP (`SetAVTransportURI` / `Play` / `Pause` / `Seek` / `Stop`). The TV fetches the stream itself and the phone can lock.
+    - A bar under the player offers pause / resume, another device and stop casting.
+    - The phone's own playback pauses while casting; switching episodes follows on the TV; the cast starts at the current position.
+    - Plain `java.net`, no third-party SDK.
+  - Video starts with sound (no tap needed), fullscreen switches to landscape and hides the system bars, and the screen stays on while playing.
+  - Links to other sites open in the system browser, and 导入配置 can pick files.
+- Site: `js/app-cast.js` (the device picker and cast bar, only active inside the app through `window.LibreTVApp`). The home settings show an App 设置 card inside the app (site address, version, 更换网站地址) and a 下载安卓 App card in Android browsers.
+- README: an 安卓 App section, FAQ entries for installing and for troubleshooting casting, and `android/README.md` with build and signing instructions. The signing key is not in the repository.
+
+Checked:
+- The DLNA client against a simulated renderer: SSDP discovery finds it, and play with a start position, pause, resume, seek and stop arrive in order with the URL and title escaped correctly.
+- 4 JVM unit tests for the description parsing, metadata escaping, seek format and SSDP headers.
+- The web flow with a simulated app bridge: search, pick, local pause, the cast bar, pause, episode follow and stop.
+- Android lint reports 0 errors, and the release APK's signature verifies.
+- It has not yet been tried on a real phone and TV.
+
+## 1.2.53 - 2026-10-31
+
+### Fixed
+
+- The footer's build time did not match the visitor's local time. The `VERSION.txt` stamp was shown as written, and recent stamps were not even the real release time. Stamps now record the release time in UTC, and the footer converts them to the visitor's time zone: this release reads 15:xx in Beijing and 00:xx in Los Angeles.
+
+## 1.2.52 - 2026-10-31
+
+### Added
+
+- iPhone / iPad: how to install the site as an app. iOS has no install button or prompt; web apps are added from the browser's share menu.
+  - The home page shows a one-time hint at the bottom ("知道了" hides it for good). The settings panel keeps the same instructions at the top.
+  - The wording follows the browser: Safari's share button, Chrome / Edge / Firefox's share button next to the address bar, and in WeChat / QQ / Weibo / DingTalk's built-in browsers, a note to open the page in Safari first.
+  - Nothing is shown on other devices or when the site was already opened from the home screen.
+
+### Changed
+
+- Muted autoplay: browsers, iPhone most of all, only allow video with sound after a tap on the current page, and the tap on the home page does not carry over to the player page, so playback starts muted. A 「🔇 点按开启声音」 button now sits on the picture instead of a toast that disappeared. A tap on the button, a tap anywhere on the page or any key restores the sound; the button tap does not also pause the video. Scroll gestures are deliberately not used, since iPhone pauses a video unmuted without a tap.
+- README FAQ: installing on iPhone, why iPhone fullscreen cannot force landscape, and why videos may start muted.
+
+## 1.2.51 - 2026-10-31
+
+### Fixed
+
+- iPhone: the fullscreen button only enlarged the player inside the page, with Safari's address bar and toolbars still showing. iPhone Safari cannot put a page element fullscreen (Android and iPad can), only the video itself, so the button now opens the system video player in real fullscreen (`webkitEnterFullscreen`).
+  - The system player does not show the site's comments (弹幕) or gesture layer. For those, player settings → 网页全屏 (only shown on such devices) still offers the in-page fullscreen.
+  - 画质增强 draws on a canvas over the video, which the system player does not show, so it pauses while in system fullscreen and comes back on exit.
+  - Android, iPad and desktop are unchanged.
+
+## 1.2.50 - 2026-10-31
+
+### Security
+
+- Dependency upgrades for GitHub's Dependabot alerts (50 alerts across 10 npm packages; `npm audit` now reports 0):
+  - `axios` 1.9.0 → 1.21.0 (high), with its `follow-redirects` 1.16.2 (moderate) and `form-data` 4.0.6 (critical).
+  - Through `express` 5.1: `proxy-addr` 2.0.8 (critical), `path-to-regexp` 8.4.2 (high), `body-parser` 2.4.0 (high), `qs` 6.17.1 (moderate).
+  - Tailwind build tools: `picomatch`, `brace-expansion` and `minimatch` (high) updated in the lockfile.
+  - All are lockfile updates within the declared ranges; `axios` now requires at least 1.21.0.
+- `nodemon` is removed: even its latest release depends on a vulnerable `minimatch` 3.x, and npm's only fix was a downgrade to nodemon 1.0.2. `npm run dev` now uses Node's built-in `node --watch server.mjs` (restarts when the server code changes; pages, scripts and styles are read fresh on every request anyway). `nodemon.json` is deleted.
+
+Checked after the upgrade: unit tests pass; `npm ci --omit=dev` (the Docker install) from the new lockfile; the Node proxy end to end (gzip bodies complete, `%2B` / `%26` kept, HTML sent as plain text, `Set-Cookie` dropped, private addresses refused, Range answered with 206); and that axios 1.21 calls the private-address DNS check on every redirect hop.
+
+## 1.2.49 - 2026-10-31
+
+Whole-project audit: bugs found by reading every page's code, each confirmed in the browser or by a test before fixing.
+
+### Fixed
+
+- The adult-content filter (on by default) hid ordinary titles. It matched words such as 成人, 福利 and 情色 anywhere in the title, the synopsis or the genre tags, so 长大成人, 孤儿 (福利院 in the synopsis), 爱情色香味, 摩登家庭 and 铁皮鼓 disappeared from results. Measured on four default sources and eight common words: 147 of 3,733 results were hidden, about 85 of them ordinary titles. Now category words (伦理片, 福利, 理论片…) are matched against the source's category only, and titles only against unambiguous words; synopses and genre tags are not read. Same measurement afterwards: 78 hidden, one of them arguably ordinary. Douban cards are only filtered when the switch is on.
+- Home page Douban tags (热门, 最新, 美剧, 动作…) loaded nothing from servers outside mainland China: `movie.douban.com/j/search_subjects` redirects those requests to Douban's bot check, and the third-party fallback (`api.allorigins.win`) no longer answered. Tags now use the same mobile API as the filter panel (`m.douban.com/rexxar`): chart tags via `subject/recent_hot`, genre and custom tags via the recommend tag search. The fallback is removed, 换一批 wraps at the end of short lists, and switching 电影 / 电视剧 starts from the first page.
+- Phones: dragging the inline progress bar did nothing, and every tap or drag on it threw `art.seek is not a function` (an old handler called `seek` as a function and stopped the player's own handler). The handler is removed; ArtPlayer's own seeking is used.
+- Desktop: double-clicking the picture to go fullscreen also paused the video.
+- 继续观看 → 全部历史 opened the history panel and closed it again in the same click.
+- Daily source check-up:
+  - It stopped adult and custom sources because they returned no result for the probe title. For those, only being unreachable counts now.
+  - 恢复 on a stopped source did not stick (the next run stopped it again). A source restored by hand now stays on.
+  - A run where most sources are unreachable (offline, proxy down) is no longer recorded.
+  - The diagnostics page's 检测源 no longer unselects sources when most checks fail, and never leaves none selected.
+- Safari 17+ (iPhone, Mac): right after hls.js attached through its own `<source>` element, the AirPlay helper replaced that element's address with the playlist, so Safari played the stream natively and the ad filter, quality menu and stats were bypassed. AirPlay now gets a separate HLS `<source>` after hls.js's. Not tested on a real Safari here.
+- The 「已从 xx 继续播放」 hint was added to a hidden section and never seen; it now shows on the picture, also in fullscreen.
+- 画质增强: if the GPU dropped the WebGL context, the picture stayed black with sound. It now falls back to the plain picture and says so.
+- 换源 matched other sources' copies by title only, so for remakes (红楼梦 1987 / 2010) it could switch to a different work. The release year must now agree within a year when both sides have one.
+- A damaged `selectedAPIs` / `customAPIs` value in local storage stopped the home and player scripts. It now falls back to the defaults.
+- Config export now includes 稍后看, custom Douban tags, the Douban filter, danmaku / enhance / speed / skip settings and the check-up state. Imports skip values of the wrong shape instead of storing them, URL import accepts files served as `text/plain` (GitHub raw), and import errors show their real reason.
+- 重试 did nothing for MP4 or natively played video; it now reloads and returns to the same position.
+- The progress-bar preview lived outside the element that goes fullscreen, so in fullscreen it was invisible yet still downloaded preview segments.
+
+### Security
+
+- Proxy responses (Cloudflare, Node/Docker, Vercel, Netlify) are served from the site's own origin, and upstream pages, scripts, `Set-Cookie` and `Service-Worker-Allowed` were passed through, so a crafted proxy link could run script on the site or install a service worker. HTML / script responses are now sent as plain text, those headers are dropped, and every proxied response carries `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`. Vercel and Netlify no longer forward the visitor's Referer upstream.
+- The player's 上一页 followed any `returnUrl`, including `javascript:` links and other sites; only same-site addresses are followed now (also for the saved last page).
+- Custom source names / addresses and the episode number in viewing history were inserted into the page unescaped, so an imported config could run script.
+
+### Fixed (Node.js / Docker only)
+
+- Setting only `PASSWORD_HASH` (as the README describes) left the pages without a password and showed 「必须设置密码」.
+- Compressed upstream responses were cut short: the original `Content-Length` was forwarded after decompression.
+- Proxied addresses were URL-decoded twice, breaking links containing `%2B`, `%26` and the like.
+- The private-address block missed `127.0.0.2`, `[::1]`, link-local / cloud metadata (`169.254.169.254`, `100.100.100.200`) and redirects. Every connection, redirects included, now checks the resolved address (skipped when an outbound `HTTP(S)_PROXY` resolves names).
+- Range requests were not forwarded (MP4 seeking through the proxy) and speed tests (`probe=1`) downloaded whole files; both now behave like the Cloudflare proxy.
+- Site pages, scripts and styles were cached for a day, so after an update browsers mixed new pages with old scripts. Only `libs/` and `image/` keep the long cache.
+
+### Changed
+
+- The service worker cached every visited page address, query string included (one copy per video watched); pages are now cached by path, and offline fallbacks no longer hand an HTML page to failed script or data requests.
+- Removed unused code (old aggregated search, Douban tag fetch, search helpers, a status widget, a redundant proxy auth check) and two unused upstream images (`image/nomedia.png`, `.psd`, 256 KB).
+
+## 1.2.48 - 2026-10-31
+
+### Added
+
+- 弹幕 (on-screen comments). For the title and episode being played, the player looks the work up on 360 影视 (`api.so.360kan.com`), takes the same episode's page on Tencent Video, iQiyi or Mango TV, and loads that episode's public comments: Tencent and iQiyi straight from the browser (both allow cross-origin reads), Mango TV through the site's proxy. Youku is not used (its comment API needs signed requests) and 360 rarely lists Bilibili. Films on several platforms use the one with the most comments. Rendering uses ArtPlayer's official danmaku plugin (`libs/artplayer-plugin-danmuku.js`, v5.3.0, MIT) without the send box.
+  - Player settings → 弹幕: 关闭 / 稀疏 / 适中 / 密集, at most about 1 / 2 / 4 comments a second, keeping the most liked ones and dropping very long or repeated ones; remembered, and `D` toggles it. Phones show smaller text in the top half of the picture.
+  - Segments near the playback position load first, so comments usually appear within about 3 seconds while the rest fills in; a new episode loads its own comments. The setting and 统计信息 show the platform and count, or that none were found.
+  - Measured: 漫长的季节 episode 1 had 82,896 comments on Tencent Video (8,632 shown at 适中), 狂飙 loaded from iQiyi, 乘风破浪 from Mango TV.
+
+### Fixed
+
+- `js/api.js` treated every URL whose path starts with `/api/` as this site's own API, on any domain, which swallowed other services' requests (such as iQiyi's `pcw-api.iq.com/api/…`). Only same-origin `/api/` requests are handled now; `Request` objects are read correctly too.
+
 ## 1.2.47 - 2026-10-28
 
 ### Fixed

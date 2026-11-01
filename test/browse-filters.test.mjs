@@ -155,3 +155,23 @@ test('home page uses a compact sticky top bar with a recent-search dropdown', as
   const ui = await read('js/ui.js');
   assert.match(ui, /function setupRecentSearchesDropdown\(\)/);
 });
+
+test('home tags use the rexxar endpoints, not the blocked movie.douban.com/j API', async () => {
+  const filter = await load('js/douban-filter.js', 'DoubanFilter');
+  const hot = new URL(filter.buildTagUrl('movie', '热门', 16, 16));
+  assert.equal(hot.pathname, '/rexxar/api/v2/subject/recent_hot/movie');
+  assert.deepEqual(plain(query(hot)), { start: '16', limit: '16', category: '热门', type: '全部' });
+  assert.deepEqual(plain(query(filter.buildTagUrl('movie', '欧美'))), { start: '0', limit: '24', category: '热门', type: '欧美' });
+  assert.equal(query(filter.buildTagUrl('tv', '美剧')).type, 'tv_american');
+  assert.deepEqual(plain(query(filter.buildTagUrl('tv', '综艺'))), { start: '0', limit: '24', category: 'show', type: 'show' });
+
+  const british = new URL(filter.buildTagUrl('tv', '英剧'));
+  assert.equal(british.pathname, '/rexxar/api/v2/tv/recommend');
+  assert.deepEqual(JSON.parse(british.searchParams.get('selected_categories')), { 形式: '电视剧', 地区: '英国' });
+
+  // Genre and user-added tags go through the recommend tag search.
+  const custom = new URL(filter.buildTagUrl('movie', '治愈'));
+  assert.equal(custom.pathname, '/rexxar/api/v2/movie/recommend');
+  assert.equal(custom.searchParams.get('tags'), '治愈');
+  for (const tag of ['热门', '最新', '动作', '日综']) assert.doesNotMatch(filter.buildTagUrl('movie', tag), /movie\.douban\.com\/j\//);
+});

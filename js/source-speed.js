@@ -58,7 +58,8 @@
         return Number(headers.get('Content-Length')) || 0;
     }
 
-    async function readResponse(targetUrl, signal, { throughProxy, playlist }) {
+    // sample: { budgetMs, maxBytes } overrides the per-sample limits (the quick mode used by 一键优选).
+    async function readResponse(targetUrl, signal, { throughProxy, playlist, sample = {} }) {
         const options = { cache: 'no-store', signal };
         let requestUrl = targetUrl;
         if (throughProxy) {
@@ -84,7 +85,8 @@
 
         // A media-looking URL can still answer with an HLS playlist.
         const isPlaylist = playlist || /mpegurl/i.test(contentType);
-        const maxBytes = isPlaylist ? PLAYLIST_MAX_BYTES : SAMPLE_MAX_BYTES;
+        const maxBytes = isPlaylist ? PLAYLIST_MAX_BYTES : (sample.maxBytes || SAMPLE_MAX_BYTES);
+        const budgetMs = sample.budgetMs || SAMPLE_BUDGET_MS;
         const reader = response.body.getReader();
         const chunks = [];
         let bytes = 0;
@@ -105,7 +107,7 @@
                 if (isPlaylist) chunks.push(chunk);
                 bytes += chunk.length;
                 lastChunkAt = now;
-                if (!isPlaylist && now - firstChunkAt >= SAMPLE_BUDGET_MS) break;
+                if (!isPlaylist && now - firstChunkAt >= budgetMs) break;
             }
         } finally {
             await reader.cancel().catch(() => {});
@@ -127,14 +129,14 @@
         };
     }
 
-    async function fetchWithFallback(targetUrl, signal, playlist) {
+    async function fetchWithFallback(targetUrl, signal, playlist, sample) {
         try {
             // Playback requests media directly from the viewer's browser, so the
             // direct path is the one that matters; the proxy is only a fallback.
-            return await readResponse(targetUrl, signal, { throughProxy: false, playlist });
+            return await readResponse(targetUrl, signal, { throughProxy: false, playlist, sample });
         } catch (error) {
             if (signal.aborted) throw error;
-            return readResponse(targetUrl, signal, { throughProxy: true, playlist });
+            return readResponse(targetUrl, signal, { throughProxy: true, playlist, sample });
         }
     }
 
@@ -212,7 +214,9 @@
         if (windowMs >= MIN_WINDOW_MS && windowBytes >= MIN_WINDOW_BYTES) {
             return windowBytes * 1000 / windowMs;
         }
-        return sample.bytes * 1000 / Math.max(1, sample.lastChunkAt - sample.headersAt);
+        // Too little arrived to time the transfer itself (a small file in one burst): count the whole
+        // request including latency, which understates rather than reporting an impossible rate.
+        return sample.bytes * 1000 / Math.max(1, sample.elapsedMs);
     }
 
     function smoothnessVerdict(kbps, bitrateKbps) {
@@ -253,7 +257,9 @@
         throw new Error('播放列表嵌套过深');
     }
 
-    async function probeEpisodeUrl(episodeUrl, { signal } = {}) {
+    // quick: a shorter sample (about 1 s, at most 1 MiB) for ranking many sources at once.
+    async function probeEpisodeUrl(episodeUrl, { signal, quick = false } = {}) {
+        const sampleLimits = quick ? { budgetMs: 1000, maxBytes: 1024 * 1024 } : undefined;
         const playlistGuard = linkSignals(signal, PLAYLIST_TIMEOUT_MS);
         let target;
         try {
@@ -269,11 +275,11 @@
             if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
             const sampleGuard = linkSignals(signal, SAMPLE_TIMEOUT_MS);
             try {
-                let sample = await fetchWithFallback(target.segmentUrl, sampleGuard.signal, false);
+                let sample = await fetchWithFallback(target.segmentUrl, sampleGuard.signal, false, sampleLimits);
                 if (sample.isPlaylist) {
                     // The URL looked like media but served a playlist: follow it to a real segment.
                     target = await samplePlaylistChain(target.segmentUrl, sampleGuard.signal, true);
-                    sample = await fetchWithFallback(target.segmentUrl, sampleGuard.signal, false);
+                    sample = await fetchWithFallback(target.segmentUrl, sampleGuard.signal, false, sampleLimits);
                     if (sample.isPlaylist) throw new Error('播放列表嵌套过深');
                 }
                 if (sample.bytes < 1024) throw new Error('媒体样本过小');

@@ -78,6 +78,7 @@ function saveUserTags() {
 let doubanMovieTvCurrentSwitch = 'movie';
 let doubanCurrentTag = '热门';
 let doubanPageStart = 0;
+let doubanTagTotal = 0; // 当前标签列表的总条数（翻页到底时回到第一页）
 const doubanPageSize = 16; // 一次显示的项目数量
 
 function isAdultRecommendTagAvailable() {
@@ -394,131 +395,6 @@ function updateDoubanVisibility() {
     }
 }
 
-// 只填充搜索框，不执行搜索，让用户自主决定搜索时机
-function fillSearchInput(title) {
-    if (!title) return;
-    
-    // 安全处理标题，防止XSS
-    const safeTitle = title
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    
-    const input = document.getElementById('searchInput');
-    if (input) {
-        input.value = safeTitle;
-        
-        // 聚焦搜索框，便于用户立即使用键盘操作
-        input.focus();
-        
-        // 显示一个提示，告知用户点击搜索按钮进行搜索
-        showToast('已填充搜索内容，点击搜索按钮开始搜索', 'info');
-    }
-}
-
-// 填充搜索框并执行搜索
-function fillAndSearch(title) {
-    if (!title) return;
-    
-    // 安全处理标题，防止XSS
-    const safeTitle = title
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    
-    const input = document.getElementById('searchInput');
-    if (input) {
-        input.value = safeTitle;
-        search(); // 使用已有的search函数执行搜索
-        
-        // 同时更新浏览器URL，使其反映当前的搜索状态
-        try {
-            // 使用URI编码确保特殊字符能够正确显示
-            const encodedQuery = encodeURIComponent(safeTitle);
-            // 使用HTML5 History API更新URL，不刷新页面
-            window.history.pushState(
-                { search: safeTitle }, 
-                `搜索: ${safeTitle} - LibreTV`, 
-                `/s=${encodedQuery}`
-            );
-            // 更新页面标题
-            document.title = `搜索: ${safeTitle} - LibreTV`;
-        } catch (e) {
-            console.error('更新浏览器历史失败:', e);
-        }
-    }
-}
-
-// 填充搜索框，确保推荐资源API被选中，然后执行搜索
-async function fillAndSearchWithDouban(title) {
-    if (!title) return;
-    
-    // 安全处理标题，防止XSS
-    const safeTitle = title
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    
-    const preferredSource = DEFAULT_SELECTED_APIS.find(apiId => API_SITES[apiId]);
-    const hasSearchableSource = typeof selectedAPIs !== 'undefined' &&
-        (typeof getSearchableApiIds === 'function' ? getSearchableApiIds(selectedAPIs) : selectedAPIs).length > 0;
-
-    // 只有一个可搜索的源都没选时才自动补选默认源，不改动用户自己的选择
-    if (preferredSource && !hasSearchableSource && !selectedAPIs.includes(preferredSource)) {
-        const sourceCheckbox = document.querySelector(`input[id="api_${preferredSource}"]`);
-        if (sourceCheckbox) {
-            sourceCheckbox.checked = true;
-            
-            // 触发updateSelectedAPIs函数以更新状态
-            if (typeof updateSelectedAPIs === 'function') {
-                updateSelectedAPIs();
-            } else {
-                // 如果函数不可用，则手动添加到selectedAPIs
-                selectedAPIs.push(preferredSource);
-                localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
-                
-                // 更新选中API计数（如果有这个元素）
-                const countEl = document.getElementById('selectedAPICount');
-                if (countEl) {
-                    countEl.textContent = selectedAPIs.length;
-                }
-            }
-            
-            showToast('已自动选择推荐资源API', 'info');
-        }
-    }
-    
-    // 填充搜索框并执行搜索
-    const input = document.getElementById('searchInput');
-    if (input) {
-        input.value = safeTitle;
-        await search(); // 使用已有的search函数执行搜索
-        
-        // 更新浏览器URL，使其反映当前的搜索状态
-        try {
-            // 使用URI编码确保特殊字符能够正确显示
-            const encodedQuery = encodeURIComponent(safeTitle);
-            // 使用HTML5 History API更新URL，不刷新页面
-            window.history.pushState(
-                { search: safeTitle }, 
-                `搜索: ${safeTitle} - LibreTV`, 
-                `/s=${encodedQuery}`
-            );
-            // 更新页面标题
-            document.title = `搜索: ${safeTitle} - LibreTV`;
-        } catch (e) {
-            console.error('更新浏览器历史失败:', e);
-        }
-
-        if (window.innerWidth <= 768) {
-          window.scrollTo({
-              top: 0,
-              behavior: 'smooth'
-          });
-        }
-    }
-}
-
 // 渲染电影/电视剧切换器
 function renderDoubanMovieTvSwitch() {
     // 获取切换按钮元素
@@ -538,6 +414,7 @@ function renderDoubanMovieTvSwitch() {
             
             doubanMovieTvCurrentSwitch = 'movie';
             doubanCurrentTag = '热门';
+            doubanPageStart = 0;
 
             // 重新加载豆瓣内容
             renderDoubanTags(movieTags);
@@ -564,6 +441,7 @@ function renderDoubanMovieTvSwitch() {
             
             doubanMovieTvCurrentSwitch = 'tv';
             doubanCurrentTag = '热门';
+            doubanPageStart = 0;
 
             // 重新加载豆瓣内容
             renderDoubanTags(tvTags);
@@ -656,37 +534,13 @@ function setupDoubanRefreshBtn() {
     
     btn.onclick = function() {
         doubanPageStart += doubanPageSize;
-        if (doubanPageStart > 9 * doubanPageSize) {
+        // 列表不长的标签（如纪录片）翻到底就回到第一页，不显示空白页
+        if (doubanPageStart > 9 * doubanPageSize || (doubanTagTotal && doubanPageStart >= doubanTagTotal)) {
             doubanPageStart = 0;
         }
         
         renderRecommend(doubanCurrentTag, doubanPageSize, doubanPageStart);
     };
-}
-
-function fetchDoubanTags() {
-    const movieTagsTarget = `https://movie.douban.com/j/search_tags?type=movie`
-    fetchDoubanData(movieTagsTarget)
-        .then(data => {
-            movieTags = sanitizeDoubanTags(data.tags, defaultMovieTags);
-            if (doubanMovieTvCurrentSwitch === 'movie') {
-                renderDoubanTags(movieTags);
-            }
-        })
-        .catch(error => {
-            console.error("获取豆瓣热门电影标签失败：", error);
-        });
-    const tvTagsTarget = `https://movie.douban.com/j/search_tags?type=tv`
-    fetchDoubanData(tvTagsTarget)
-       .then(data => {
-            tvTags = sanitizeDoubanTags(data.tags, defaultTvTags);
-            if (doubanMovieTvCurrentSwitch === 'tv') {
-                renderDoubanTags(tvTags);
-            }
-        })
-       .catch(error => {
-            console.error("获取豆瓣热门电视剧标签失败：", error);
-        });
 }
 
 // 渲染热门推荐内容
@@ -707,12 +561,15 @@ function renderRecommend(tag, pageLimit, pageStart) {
         return renderAdultRecommend(pageLimit, pageStart, isCurrentRequest);
     }
 
-    const target = `https://movie.douban.com/j/search_subjects?type=${doubanMovieTvCurrentSwitch}&tag=${tag}&sort=recommend&page_limit=${pageLimit}&page_start=${pageStart}`;
+    const target = window.DoubanFilter.buildTagUrl(doubanMovieTvCurrentSwitch, tag, pageStart, pageLimit);
 
     // 相同的请求共享同一份数据，但只有最新一次调用会渲染，避免同一批封面被渲染两次
     return fetchDoubanDataShared(target)
         .then(data => {
-            if (isCurrentRequest()) renderDoubanCards(data, container);
+            if (!isCurrentRequest()) return;
+            const page = window.DoubanFilter.mapRecommend(data);
+            doubanTagTotal = page.total;
+            renderDoubanCards(page, container);
         })
         .catch(error => {
             if (!isCurrentRequest()) return;
@@ -724,13 +581,6 @@ function renderRecommend(tag, pageLimit, pageStart) {
                 </div>
             `;
         });
-}
-
-function escapeInlineJsString(value) {
-    return String(value || '')
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/\r?\n/g, ' ');
 }
 
 function getAdultRecommendPage(pageLimit, pageStart) {
@@ -793,9 +643,6 @@ function renderAdultCards(items, container) {
 
             const rawTitle = item.vod_name || '未知视频';
             const safeTitle = escapeHtmlAttr(rawTitle);
-            const safeTitleJs = escapeInlineJsString(rawTitle);
-            const safeIdJs = escapeInlineJsString(item.vod_id || '');
-            const safeSourceCodeJs = escapeInlineJsString(item.source_code || '');
             const sourceName = escapeHtmlAttr(item.source_name || '');
             const originalCoverUrl = normalizeImageUrl(item.vod_pic, item.api_url || API_SITES[item.source_code]?.api || '');
             const safeCoverUrl = escapeHtmlAttr(originalCoverUrl);
@@ -867,30 +714,9 @@ async function fetchDoubanData(url) {
         
         return await response.json();
     } catch (err) {
-        console.error("豆瓣 API 请求失败（直接代理）：", err);
-        
-        // 失败后尝试备用方法：作为备选
-        const fallbackUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-        
-        try {
-            const fallbackResponse = await fetch(fallbackUrl);
-            
-            if (!fallbackResponse.ok) {
-                throw new Error(`备用API请求失败! 状态: ${fallbackResponse.status}`);
-            }
-            
-            const data = await fallbackResponse.json();
-            
-            // 解析原始内容
-            if (data && data.contents) {
-                return JSON.parse(data.contents);
-            } else {
-                throw new Error("无法获取有效数据");
-            }
-        } catch (fallbackErr) {
-            console.error("豆瓣 API 备用请求也失败：", fallbackErr);
-            throw fallbackErr; // 向上抛出错误，让调用者处理
-        }
+        clearTimeout(timeoutId);
+        console.error("豆瓣 API 请求失败：", err);
+        throw err;
     }
 }
 
@@ -899,7 +725,9 @@ function renderDoubanCards(data, container, options = {}) {
     // 创建文档片段以提高性能
     const fragment = document.createDocumentFragment();
     const subjects = Array.isArray(data.subjects)
-        ? data.subjects.filter(item => typeof matchesYellowContent !== 'function' || !matchesYellowContent(item))
+        ? data.subjects.filter(item => typeof matchesYellowContent !== 'function' ||
+            (typeof isYellowContentFilterEnabled === 'function' && !isYellowContentFilterEnabled()) ||
+            !matchesYellowContent(item))
         : [];
     
     // 如果没有数据

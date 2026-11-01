@@ -74,7 +74,7 @@ test('the download button is desktop-only and sits between 换源 and 更多', a
   const player = await read('js/player.js');
   const bar = player.slice(player.indexOf('<div class="quick-player-actions">'), player.indexOf('id="quickSettingsButton"'));
   assert.ok(bar.indexOf('switchResourceBtn') < bar.indexOf('downloadVideoButton'));
-  assert.match(bar, /isMobilePlaybackDevice\(\) \|\| !window\.PlayerDownload \? '' : '<button type="button" id="downloadVideoButton"/);
+  assert.match(bar, /isMobilePlaybackDevice\(\) \|\| window\.TVMode\?\.active \|\| !window\.PlayerDownload \? '' : '<button type="button" id="downloadVideoButton"/);
   assert.match(player, /PlayerDownload\?\.start\(\{ url: currentVideoUrl, fileName: downloadFileName\(\), filterAds: adFilteringEnabled \}\)/);
   assert.match(player, /navigator\.clipboard\.writeText\(currentVideoUrl\)/);
   const download = await read('js/player-download.js');

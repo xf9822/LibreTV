@@ -97,6 +97,41 @@
         return `https://m.douban.com/rexxar/api/v2/${kind === 'tv' ? 'tv' : 'movie'}/recommend?${params}`;
     }
 
+    // 首页标签（热门、美剧、动作……）对应的豆瓣移动端接口。旧的 movie.douban.com/j/search_subjects
+    // 从海外 IP 访问会被跳到反爬验证页，这里统一改用 rexxar：榜单类标签走 recent_hot，
+    // 其余（类型标签与用户自定义标签）走 recommend 的标签检索。
+    const MOVIE_HOT = { 热门: ['热门', '全部'], 最新: ['最新', '全部'], 豆瓣高分: ['豆瓣高分', '全部'], 冷门佳片: ['冷门佳片', '全部'],
+        华语: ['热门', '华语'], 欧美: ['热门', '欧美'], 韩国: ['热门', '韩国'], 日本: ['热门', '日本'] };
+    const TV_HOT = { 热门: ['tv', 'tv'], 美剧: ['tv', 'tv_american'], 韩剧: ['tv', 'tv_korean'], 日剧: ['tv', 'tv_japanese'],
+        国产剧: ['tv', 'tv_domestic'], 日本动画: ['tv', 'tv_animation'], 纪录片: ['tv', 'tv_documentary'], 综艺: ['show', 'show'] };
+    const TAG_CATEGORIES = {
+        movie: { 日综: ['tv', { 形式: '综艺', 地区: '日本' }] },
+        tv: { 英剧: ['tv', { 形式: '电视剧', 地区: '英国' }], 港剧: ['tv', { 形式: '电视剧', 地区: '中国香港' }] }
+    };
+
+    function buildTagUrl(kind, tag, start = 0, count = PAGE_SIZE) {
+        const base = 'https://m.douban.com/rexxar/api/v2';
+        const name = String(tag || '').trim() || '热门';
+        const hot = (kind === 'tv' ? TV_HOT : MOVIE_HOT)[name];
+        if (hot) {
+            const params = new URLSearchParams({ start: String(start), limit: String(count), category: hot[0], type: hot[1] });
+            return `${base}/subject/recent_hot/${kind === 'tv' ? 'tv' : 'movie'}?${params}`;
+        }
+        const [endpoint, categories] = TAG_CATEGORIES[kind === 'tv' ? 'tv' : 'movie'][name] || [kind === 'tv' ? 'tv' : 'movie', {}];
+        const tags = Object.keys(categories).length ? Object.values(categories) : [name];
+        const params = new URLSearchParams({
+            refresh: '0',
+            start: String(start),
+            count: String(count),
+            selected_categories: JSON.stringify(categories),
+            uncollect: 'false',
+            score_range: '0,10',
+            tags: tags.join(','),
+            sort: 'T'
+        });
+        return `${base}/${endpoint}/recommend?${params}`;
+    }
+
     // "2026 / 美国 英国 / 剧情 科幻 / 导演 / 演员" -> "2026 · 美国"
     function shortMeta(item) {
         const parts = String(item.card_subtitle || '').split(' / ').map(part => part.trim()).filter(Boolean);
@@ -181,6 +216,7 @@
         readState,
         writeState,
         buildRecommendUrl,
+        buildTagUrl,
         mapRecommend,
         describe,
         renderPanel

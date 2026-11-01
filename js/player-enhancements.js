@@ -372,6 +372,7 @@
             case '>': return { type: 'rate', delta: 1 };
             case 'f': return { type: 'fullscreen' };
             case 'w': return { type: 'web-fullscreen' };
+            case 'd': return { type: 'danmaku' };
             case '?': return { type: 'help' };
             case 'Escape': return { type: 'escape' };
             default: return null;
@@ -396,6 +397,7 @@
         ['[ / ]', '减速 / 加速'],
         ['0 – 9', '跳到 0% – 90%'],
         ['F / W', '全屏 / 网页全屏'],
+        ['D', '弹幕开 / 关'],
         ['?', '显示 / 隐藏本帮助']
     ];
 

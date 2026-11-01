@@ -19,6 +19,10 @@
     const PLAYABLE = /https?:\/\/[^#$\s]+?\.(?:m3u8|mp4)/i;
     // Collection sites that only serve whole-site crawling answer searches like this.
     const FORBIDDEN = /forbid|不支持搜索|禁止搜索|关闭搜索/i;
+    const UNREACHABLE = '无法访问';
+    // When most probes cannot reach their site the fault is on this side (offline, proxy down):
+    // that run is not recorded.
+    const OUTAGE_SHARE = 0.6;
 
     const read = (key, fallback) => {
         try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; }
@@ -48,11 +52,16 @@
 
     // Probe outcome from one search: ok / forbidden (search switched off) / failed.
     function classify(data) {
-        if (!data || typeof data !== 'object') return { status: 'failed', reason: '无法访问' };
+        if (!data || typeof data !== 'object') return { status: 'failed', reason: UNREACHABLE };
         const list = Array.isArray(data.list) ? data.list : [];
         if (list.some(item => PLAYABLE.test(String(item?.vod_play_url || '')))) return { status: 'ok', reason: '' };
         if (FORBIDDEN.test(String(data.msg || ''))) return { status: 'forbidden', reason: '已关闭关键词搜索' };
         return { status: 'failed', reason: list.length ? '搜索结果没有可播放地址' : (String(data.msg || '').slice(0, 40) || '搜索无结果') };
+    }
+
+    function isOutage(results) {
+        const unreachable = results.filter(([, result]) => result.status === 'failed' && result.reason === UNREACHABLE).length;
+        return results.length >= 3 && unreachable / results.length >= OUTAGE_SHARE;
     }
 
     // One entry per day per source, newest last.
@@ -84,9 +93,16 @@
         const searchable = selected.filter(id => !siteMap[id]?.adult);
         let remaining = searchable.length;
         for (const id of selected) {
+            // Sources the viewer restored by hand stay on.
+            if (state.kept?.[id]) continue;
             const list = history[id] || [];
-            const forbiddenDays = trailing(list, item => item.status === 'forbidden');
-            const failedDays = trailing(list, item => item.status !== 'ok');
+            // Adult and custom sources need not carry the probe title, so for them an empty or
+            // unplayable answer says nothing: only being unreachable counts.
+            const probeFits = !siteMap[id]?.adult && !id.startsWith('custom_');
+            const forbiddenDays = probeFits ? trailing(list, item => item.status === 'forbidden') : 0;
+            const failedDays = trailing(list, probeFits
+                ? item => item.status !== 'ok'
+                : item => item.status === 'failed' && item.reason === UNREACHABLE);
             let reason = '';
             if (forbiddenDays >= FORBIDDEN_DAYS_TO_DISABLE) reason = '已关闭关键词搜索';
             else if (failedDays >= FAILED_DAYS_TO_DISABLE) reason = `连续 ${failedDays} 天无法搜索`;
@@ -123,7 +139,10 @@
 
     function score(id) {
         const quality = window.LibreExperience?.qualityScore?.(id) || 0;
-        return healthScore(read(HISTORY_KEY, {}), id) + quality;
+        // 一键优选在本机网络下测得的视频下载速度：越快越优先（约 1 MB/s 加 3 分，封顶 5 分）
+        const kbps = window.SourceBenchmark?.speedOf?.(id) || 0;
+        const speed = kbps > 0 ? Math.min(5, Math.log2(1 + kbps / 128)) : 0;
+        return healthScore(read(HISTORY_KEY, {}), id) + quality + speed;
     }
 
     // Stable: equal scores keep the viewer's own order.
@@ -208,7 +227,13 @@
             if (now - info.at > NOTICE_MS || !sites()[id] && !id.startsWith('custom_')) continue;
             if (selectedIds().includes(id)) continue;
             addRow(`已自动停用「${sourceName(id)}」：${info.reason}${info.replacement ? `，已换用同源的「${sourceName(info.replacement)}」` : ''}`, [
-                ['恢复', () => { setSelected(id, true); delete state.disabled[id]; write(STATE_KEY, state); renderNotice(); }],
+                ['恢复', () => {
+                    setSelected(id, true);
+                    delete state.disabled[id];
+                    state.kept = { ...(state.kept || {}), [id]: Date.now() };
+                    write(STATE_KEY, state);
+                    renderNotice();
+                }],
                 ['知道了', () => { delete state.disabled[id]; write(STATE_KEY, state); renderNotice(); }]
             ]);
         }
@@ -232,14 +257,17 @@
         const targets = probeTargets();
         const day = dayOf(Date.now());
         let history = read(HISTORY_KEY, {});
+        const results = [];
         let next = 0;
         await Promise.all(Array.from({ length: Math.min(3, targets.length) }, async () => {
             while (next < targets.length) {
                 const id = targets[next++];
                 const result = await probe(id);
-                if (result) history = addEntry(history, id, { day, ...result });
+                if (result) results.push([id, result]);
             }
         }));
+        if (isOutage(results)) return null;
+        for (const [id, result] of results) history = addEntry(history, id, { day, ...result });
         // Drop history of sources that left the list.
         for (const id of Object.keys(history)) if (!sites()[id] && !id.startsWith('custom_')) delete history[id];
         write(HISTORY_KEY, history);
@@ -283,6 +311,6 @@
 
     window.SourceAutopilot = {
         run, rank, score, renderHealthDots, renderNotice,
-        logic: { classify, addEntry, healthScore, decide, dayOf }
+        logic: { classify, addEntry, healthScore, decide, dayOf, isOutage }
     };
 })();

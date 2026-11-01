@@ -1,0 +1,79 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 签名：从 keystore.properties（不进仓库）或环境变量读取；都没有时只能打调试包
+def signingProps = new Properties()
+def signingFile = rootProject.file('keystore.properties')
+if (signingFile.exists()) signingFile.withInputStream { signingProps.load(it) }
+def signingValue = { String key, String env -> signingProps.getProperty(key) ?: System.getenv(env) }
+
+// 也可以把密钥文件本身以 Base64 放在环境变量 LIBRETV_KEYSTORE_BASE64 里（例如云端编译环境），编译时解码到 build 目录
+def keystoreBase64 = System.getenv('LIBRETV_KEYSTORE_BASE64')
+def decodedKeystore = null
+if (!signingValue('storeFile', 'LIBRETV_KEYSTORE') && keystoreBase64) {
+    decodedKeystore = new File(rootProject.buildDir, 'signing/libretv-release.jks')
+    decodedKeystore.parentFile.mkdirs()
+    decodedKeystore.bytes = keystoreBase64.replaceAll('\\s', '').decodeBase64()
+}
+
+android {
+    namespace 'io.github.wxst.libretv'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.wxst.libretv'
+        minSdk 24
+        targetSdk 35
+        versionCode 4
+        versionName '1.1.0'
+        buildConfigField 'boolean', 'IS_TV', 'false'
+    }
+
+    // 两个版本：手机版（投屏到电视）和电视版（遥控器操作，可以和手机版装在同一台设备上）
+    flavorDimensions 'device'
+    productFlavors {
+        phone {
+            dimension 'device'
+        }
+        tv {
+            dimension 'device'
+            applicationIdSuffix '.tv'
+            versionNameSuffix '-tv'
+            buildConfigField 'boolean', 'IS_TV', 'true'
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            def store = signingValue('storeFile', 'LIBRETV_KEYSTORE')
+            if (store || decodedKeystore) {
+                storeFile store ? file(store) : decodedKeystore
+                def password = signingValue('storePassword', 'LIBRETV_KEYSTORE_PASSWORD')
+                storePassword password
+                keyAlias signingValue('keyAlias', 'LIBRETV_KEY_ALIAS') ?: 'libretv'
+                keyPassword signingValue('keyPassword', 'LIBRETV_KEY_PASSWORD') ?: password
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (signingConfigs.release.storeFile) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

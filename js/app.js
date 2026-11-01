@@ -1,6 +1,15 @@
 // 全局变量
-let selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || JSON.stringify(DEFAULT_SELECTED_APIS)); // 默认选中资源
-let customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]'); // 存储自定义API列表
+// 本地设置损坏（不是 JSON 或不是数组）时回到默认值，不能让整页脚本因此中断
+function readStoredArray(key, fallback) {
+    try {
+        const value = JSON.parse(localStorage.getItem(key) || 'null');
+        return Array.isArray(value) ? value : fallback;
+    } catch (error) {
+        return fallback;
+    }
+}
+let selectedAPIs = readStoredArray('selectedAPIs', [...DEFAULT_SELECTED_APIS]); // 默认选中资源
+let customAPIs = readStoredArray('customAPIs', []); // 存储自定义API列表
 
 // 添加当前播放的集数索引
 let currentEpisodeIndex = 0;
@@ -20,13 +29,17 @@ let movieDetailRequestId = 0;
 // 全局变量用于倒序状态
 let episodesReversed = false;
 
-const YELLOW_CONTENT_KEYWORDS = [
-    '伦理片', '福利', '里番动漫', '门事件', '萝莉少女', '制服诱惑', '国产传媒',
-    'cosplay', '黑丝诱惑', '无码', '日本无码', '有码', '日本有码', 'swag',
-    '网红主播', '美女主播', '国产自拍', '色情片', '同性片', '福利视频', '福利片',
-    '成人', '情色', '女优', '人妻', '巨乳', '私拍', '大尺度', '麻豆', '抖阴',
-    '热舞', '裸聊', '自慰', '做爱', '性交', '口交', '约炮', '无码流出',
-    '番号', '爆乳', '翘臀', '嫩模', '嫩妹', '美乳', '白丝', '丝袜', '写真'
+// 成人内容识别：分类名里的词（伦理片、福利等）只匹配资源站的分类（type_name，不含 vod_class 这类
+// 题材标签，后者常带「同性」「情色」等普通影片也有的标签）；片名只拦意思明确的词。
+// 简介不参与匹配，「长大成人」「福利院」「爱情色香味」这类正常片名与简介不能被误拦。
+const YELLOW_CATEGORY_KEYWORDS = [
+    '伦理', '福利', '里番', '写真', '情色', '成人', '色情', '同性', '国产传媒', '网红主播', '美女主播',
+    '主播', '国产自拍', '无码', '有码', '制服诱惑', '萝莉少女', '黑丝诱惑', '门事件', '抖阴', '麻豆',
+    'swag', 'cosplay', '热舞', '女优', '丝袜', '自拍', '偷拍', '三级', '理论片'
+];
+const YELLOW_TITLE_KEYWORDS = [
+    '无码', '有码', '女优', '做爱', '性交', '口交', '约炮', '自慰', '裸聊', '爆乳', '巨乳', '麻豆',
+    '抖阴', '国产自拍', '无码流出', '色情片', '情色片', '福利视频', '福利片', '伦理片', '三级片', '美女主播', '私拍'
 ];
 
 const SEARCH_TITLE_FIELDS = [
@@ -106,22 +119,12 @@ function filterResultsByQuery(results, query) {
 function matchesYellowContent(item) {
     if (isAdultSourceId(item?.source_code)) return true;
 
-    const haystack = [
-        item?.vod_name,
-        item?.vod_sub,
-        item?.vod_en,
-        item?.title,
-        item?.name,
-        item?.type_name,
-        item?.vod_class,
-        item?.vod_remarks,
-        item?.vod_content,
-        item?.desc,
-        item?.description,
-        item?.source_name
-    ].map(normalizeFilterText).join(' ');
+    const category = normalizeFilterText(item?.type_name);
+    if (YELLOW_CATEGORY_KEYWORDS.some(keyword => category.includes(keyword))) return true;
 
-    return YELLOW_CONTENT_KEYWORDS.some(keyword => haystack.includes(keyword.toLowerCase()));
+    const title = [item?.vod_name, item?.vod_sub, item?.vod_en, item?.title, item?.name]
+        .map(normalizeFilterText).join(' ');
+    return YELLOW_TITLE_KEYWORDS.some(keyword => title.includes(keyword));
 }
 
 function filterYellowContentResults(results) {
@@ -172,8 +175,10 @@ function initializeDefaultSettings() {
         selectedAPIs = stillAvailable;
         changed = true;
     }
+    // 用过一键优选的用户，已经按自己的网络选好了源，不再把默认源加回去
+    const optimized = Boolean(localStorage.getItem('sourceBenchmarkV1'));
     defaultApiIds.forEach(apiId => {
-        if (!selectedAPIs.includes(apiId)) {
+        if (!optimized && !selectedAPIs.includes(apiId)) {
             selectedAPIs.push(apiId);
             changed = true;
         }
@@ -234,8 +239,8 @@ function initAPICheckboxes() {
     normalTitle.textContent = '普通资源';
     normaldiv.appendChild(normalTitle);
 
-    // 创建普通API源的复选框
-    Object.keys(API_SITES).forEach(apiKey => {
+    // 创建普通API源的复选框：按质量排序（一键优选测得的速度 + 每日体检的健康度），好的在前
+    sortedApiKeys().forEach(apiKey => {
         const api = API_SITES[apiKey];
         if (api.adult) return; // 跳过成人内容API，稍后添加
 
@@ -254,6 +259,7 @@ function initAPICheckboxes() {
                    data-api="${apiKey}">
             <label for="api_${apiKey}" class="ml-1 text-xs text-gray-400 truncate">${escapeHtmlAttr(api.name)}</label>
             ${mirrors.length ? `<span class="api-mirror-tag" title="${escapeHtmlAttr(`与${mirrors.join('、')}内容相同（同一家的镜像站），选一个即可，其余可作备用`)}">同源</span>` : ''}
+            ${apiSpeedTag(apiKey)}
             <span class="api-health-dot" data-health-for="${apiKey}" aria-hidden="true"></span>
         `;
         normaldiv.appendChild(checkbox);
@@ -273,6 +279,33 @@ function initAPICheckboxes() {
     checkAdultAPIsSelected();
     window.SourceAutopilot?.renderHealthDots();
 }
+
+// 资源站按质量排序：测得的速度为主，再看每日体检；没有测过的保持原来的顺序
+function sortedApiKeys() {
+    const keys = Object.keys(API_SITES);
+    const quality = window.SourceBenchmark?.qualityOf;
+    if (typeof quality !== 'function') return keys;
+    return keys.map((key, index) => ({ key, index, value: quality(key) }))
+        .sort((a, b) => b.value - a.value || a.index - b.index)
+        .map(item => item.key);
+}
+
+function apiSpeedTag(apiKey) {
+    const kbps = window.SourceBenchmark?.speedOf?.(apiKey) || 0;
+    if (!kbps) return '';
+    const text = kbps >= 1024 ? `${(kbps / 1024).toFixed(1)}M/s` : `${kbps}K/s`;
+    return `<span class="api-speed-tag" title="最近一次一键优选测得的视频下载速度">${text}</span>`;
+}
+
+// 一键优选等模块用：整体替换已选的资源站并刷新设置里的勾选
+function setSelectedApiIds(ids) {
+    selectedAPIs = [...new Set(Array.from(ids || []))];
+    localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
+    initAPICheckboxes();
+    renderCustomAPIsList();
+    updateSelectedApiCount();
+}
+window.setSelectedApiIds = setSelectedApiIds;
 
 // 添加成人API列表
 function addAdultAPI() {
@@ -294,7 +327,7 @@ function addAdultAPI() {
         adultdiv.appendChild(adultTitle);
 
         // 创建成人API源的复选框
-        Object.keys(API_SITES).forEach(apiKey => {
+        sortedApiKeys().forEach(apiKey => {
             const api = API_SITES[apiKey];
             if (!api.adult) return; // 仅添加成人内容API
 
@@ -375,7 +408,7 @@ function renderCustomAPIsList() {
         const textColorClass = api.isAdult ? 'text-pink-400' : 'text-white';
         const adultTag = api.isAdult ? '<span class="text-xs text-pink-400 mr-1">(18+)</span>' : '';
         // 新增 detail 地址显示
-        const detailLine = api.detail ? `<div class="text-xs text-gray-400 truncate">detail: ${api.detail}</div>` : '';
+        const detailLine = api.detail ? `<div class="text-xs text-gray-400 truncate">detail: ${escapeHtmlAttr(api.detail)}</div>` : '';
         apiItem.innerHTML = `
             <div class="flex items-center flex-1 min-w-0">
                 <input type="checkbox" id="custom_api_${index}" 
@@ -384,9 +417,9 @@ function renderCustomAPIsList() {
                        data-custom-index="${index}">
                 <div class="flex-1 min-w-0">
                     <div class="text-xs font-medium ${textColorClass} truncate">
-                        ${adultTag}${api.name}
+                        ${adultTag}${escapeHtmlAttr(api.name || '')}
                     </div>
-                    <div class="text-xs text-gray-500 truncate">${api.url}</div>
+                    <div class="text-xs text-gray-500 truncate">${escapeHtmlAttr(api.url || '')}</div>
                     ${detailLine}
                 </div>
             </div>
@@ -1164,6 +1197,17 @@ function loadMovieSourceDetail(session, entry) {
     return entry.detailPromise;
 }
 
+// 同名不同年份的作品（如 1987 版与 2010 版《红楼梦》）不是同一部：两边都有年份时，相差超过一年就不算。
+function movieSourceYear(item) {
+    return Number(String(item?.vod_year || '').match(/(?:19|20)\d{2}/)?.[0] || 0);
+}
+
+function isSameMovieSource(item, titleKey, year) {
+    if (normalizeMovieSourceTitle(item?.vod_name) !== titleKey) return false;
+    const itemYear = movieSourceYear(item);
+    return !year || !itemYear || Math.abs(itemYear - year) <= 1;
+}
+
 function createMovieSourceSession(id, title, sourceCode) {
     const normalizedTitle = normalizeMovieSourceTitle(title);
     const existing = activeMovieSourceSession;
@@ -1173,12 +1217,14 @@ function createMovieSourceSession(id, title, sourceCode) {
     }
     existing?.controller.abort();
 
-    const fromSearchResults = currentSearchResults.some(item =>
+    const original = currentSearchResults.find(item =>
         item.source_code === sourceCode && String(item.vod_id) === String(id));
+    const fromSearchResults = Boolean(original);
+    const year = movieSourceYear(original);
     const sourceIds = [...new Set([sourceCode, ...getSearchableApiIds(selectedAPIs)])];
     const entries = sourceIds.map(key => {
         const match = fromSearchResults && currentSearchResults.find(item =>
-            item.source_code === key && normalizeMovieSourceTitle(item.vod_name) === normalizedTitle);
+            item.source_code === key && isSameMovieSource(item, normalizedTitle, year));
         const vodId = key === sourceCode ? id : (match?.vod_id || '');
         return {
             sourceCode: key,
@@ -1194,6 +1240,7 @@ function createMovieSourceSession(id, title, sourceCode) {
     const session = {
         title,
         titleKey: normalizedTitle,
+        year,
         entries,
         selectedIndex: entries.findIndex(entry => entry.sourceCode === sourceCode),
         controller: new AbortController()
@@ -1206,7 +1253,7 @@ async function checkMovieSource(session, entry) {
     try {
         if (!entry.vodId) {
             const results = await searchByAPIAndKeyWord(entry.sourceCode, session.title, null, session.controller.signal);
-            const match = results.find(item => normalizeMovieSourceTitle(item.vod_name) === session.titleKey);
+            const match = results.find(item => isSameMovieSource(item, session.titleKey, session.year));
             if (session.controller.signal.aborted) return;
             if (!match) {
                 entry.status = 'missing';
@@ -1602,16 +1649,16 @@ async function importConfigFromUrl() {
             });
             if (!response.ok) throw '获取配置文件失败';
 
-            // 验证响应内容类型
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
+            // GitHub raw 等地址把 .json 当作 text/plain 返回，所以按内容解析，不看 Content-Type
+            let config;
+            try {
+                config = JSON.parse(await response.text());
+            } catch (parseError) {
                 throw '响应不是有效的JSON格式';
             }
-
-            const config = await response.json();
             await importConfigPayload(config);
         } catch (error) {
-            const message = typeof error === 'string' ? error : '导入配置失败';
+            const message = typeof error === 'string' ? error : (error?.message || '导入配置失败');
             showToast(`从URL导入配置出错 (${message})`, 'error');
         } finally {
             hideLoading();
@@ -1660,7 +1707,7 @@ async function importConfig() {
             const config = JSON.parse(content);
             await importConfigPayload(config);
         } catch (error) {
-            const message = typeof error === 'string' ? error : '配置文件格式错误';
+            const message = typeof error === 'string' ? error : (error?.message || '配置文件格式错误');
             showToast(`配置文件读取出错 (${message})`, 'error');
         }
     });

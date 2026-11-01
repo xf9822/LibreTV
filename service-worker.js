@@ -1,4 +1,4 @@
-const APP_VERSION = '202610281330';
+const APP_VERSION = '202610310906';
 const APP_SHELL_CACHE = `libretv-shell-${APP_VERSION}`;
 const OFFLINE_URL = '/offline.html';
 
@@ -49,6 +49,7 @@ const APP_SHELL_ASSETS = [
   '/js/player-stats.js',
   '/js/player-download.js',
   '/js/video-enhance.js',
+  '/js/danmaku.js',
   '/js/player.js',
   '/js/cast-receiver.js',
   '/js/diagnostics.js',
@@ -56,9 +57,15 @@ const APP_SHELL_ASSETS = [
   '/js/index-page.js',
   '/js/version-check.js',
   '/js/pwa-register.js',
+  '/js/ios-install.js',
+  '/js/app-cast.js',
+  '/js/source-benchmark.js',
+  '/js/tv-mode.js',
+  '/js/android-app.js',
   '/libs/sha256.min.js',
   '/libs/hls.min.js',
   '/libs/artplayer.min.js',
+  '/libs/artplayer-plugin-danmuku.js',
   '/image/logo.png',
   '/image/logo-black.png',
   '/image/icon-192.png',
@@ -72,6 +79,7 @@ function isNetworkOnlyRequest(request) {
   return (
     pathname.startsWith('/api/') ||
     pathname.startsWith('/proxy/') ||
+    pathname.startsWith('/download/') ||
     pathname.includes('/api.php/') ||
     pathname.endsWith('.m3u8') ||
     pathname.endsWith('.ts') ||
@@ -83,18 +91,32 @@ function isNetworkOnlyRequest(request) {
   );
 }
 
+// Pages are cached under their path alone: player.html?url=…&title=… would otherwise leave one
+// copy per video watched (and keep a record of them). Offline, any player link opens the cached
+// page shell.
+function cacheKeyFor(request) {
+  if (request.mode !== 'navigate') return request;
+  const url = new URL(request.url);
+  return url.origin + url.pathname;
+}
+
 async function networkFirst(request) {
   const cache = await caches.open(APP_SHELL_CACHE);
+  const key = cacheKeyFor(request);
 
   try {
     const response = await fetch(request);
-    if (response && response.ok) {
-      cache.put(request, response.clone());
+    if (response && response.ok && response.type === 'basic' && !response.redirected) {
+      cache.put(key, response.clone());
     }
     return response;
   } catch (error) {
-    const cached = await cache.match(request);
-    return cached || cache.match(OFFLINE_URL) || cache.match('/');
+    const cached = await cache.match(key);
+    if (cached) return cached;
+    if (request.mode === 'navigate') {
+      return (await cache.match(OFFLINE_URL)) || (await cache.match('/')) || Response.error();
+    }
+    return Response.error();
   }
 }
 
@@ -120,7 +142,8 @@ async function cacheFirstWithRefresh(request) {
     })
     .catch(() => null);
 
-  return cached || refresh || fetch(request);
+  if (cached) return cached;
+  return (await refresh) || Response.error();
 }
 
 self.addEventListener('install', event => {

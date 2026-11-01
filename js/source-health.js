@@ -253,13 +253,17 @@ function unselectFailedSources(sources) {
         .filter(source => source?.status === 'failed')
         .map(source => source.id);
     if (failedSourceIds.length === 0) return [];
+    // Most sources failing at once means this side is offline or the proxy is down: change nothing.
+    if (sources.length >= 3 && failedSourceIds.length / sources.length >= 0.6) return [];
 
     const failedSet = new Set(failedSourceIds);
     const selectedSourceIds = getSelectedApiIds();
     const nextSelectedSourceIds = selectedSourceIds.filter(sourceId => !failedSet.has(sourceId));
+    // Never leave the viewer with nothing to search.
+    if (nextSelectedSourceIds.length === 0 && selectedSourceIds.length) nextSelectedSourceIds.push(selectedSourceIds[0]);
     if (nextSelectedSourceIds.length === selectedSourceIds.length) return [];
 
-    const removedSourceIds = selectedSourceIds.filter(sourceId => failedSet.has(sourceId));
+    const removedSourceIds = selectedSourceIds.filter(sourceId => !nextSelectedSourceIds.includes(sourceId));
     saveSelectedApiIds(nextSelectedSourceIds);
     refreshSelectedApiUi(removedSourceIds);
     return removedSourceIds;

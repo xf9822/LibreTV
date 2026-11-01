@@ -192,6 +192,8 @@ window.createMobileFullscreenControls = function createMobileFullscreenControls(
         if (!options.isTouchDevice() || document.fullscreenEnabled || !event.target.closest('.art-control-fullscreen')) return;
         event.preventDefault();
         event.stopImmediatePropagation();
+        // iPhone：全屏按钮进入系统全屏（真正的全屏）；已在网页全屏时则是退出
+        if (!art.fullscreenWeb && options.enterNativeFullscreen?.()) return;
         art.fullscreenWeb = !art.fullscreenWeb;
         sync();
     }

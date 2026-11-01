@@ -132,6 +132,22 @@ function rewriteUrlToProxy(targetUrl) {
     return `/proxy/${encodeURIComponent(targetUrl)}`;
 }
 
+// 代理返回的内容出现在本站域名下：上游网页或脚本不能在这里运行，也不能写 Cookie、注册
+// Service Worker。网页 / 脚本类内容改成纯文本（前端用 fetch 读取不受影响），并统一加上沙箱。
+const DROPPED_PROXY_HEADERS = new Set(['set-cookie', 'service-worker-allowed', 'clear-site-data', 'refresh', 'link', 'content-security-policy', 'x-frame-options']);
+const PROXY_SANDBOX_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+};
+function safeProxyHeader(key, value) {
+    const lowerKey = key.toLowerCase();
+    if (DROPPED_PROXY_HEADERS.has(lowerKey)) return null;
+    if (lowerKey === 'content-type' && /html|xml|javascript|ecmascript/i.test(value) && !/svg/i.test(value)) {
+        return 'text/plain; charset=utf-8';
+    }
+    return value;
+}
+
 function getRandomUserAgent() {
     return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
@@ -143,7 +159,8 @@ async function fetchContentWithType(targetUrl, requestHeaders) {
         'Accept': requestHeaders['accept'] || '*/*', // 传递原始 Accept 头（如果有）
         'Accept-Language': requestHeaders['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
         // 尝试设置一个合理的 Referer
-        'Referer': requestHeaders['referer'] || new URL(targetUrl).origin,
+        // 只用目标站自己的地址作 Referer，不把本站地址透露给上游
+        'Referer': new URL(targetUrl).origin,
     };
     // 清理空值的头
     Object.keys(headers).forEach(key => headers[key] === undefined || headers[key] === null || headers[key] === '' ? delete headers[key] : {});
@@ -437,12 +454,15 @@ export default async function handler(req, res) {
             // 设置原始响应头，但排除有问题的头和 CORS 头（已设置）
             responseHeaders.forEach((value, key) => {
                  const lowerKey = key.toLowerCase();
-                 if (!lowerKey.startsWith('access-control-') &&
+                 const safeValue = safeProxyHeader(key, value);
+                 if (safeValue !== null &&
+                     !lowerKey.startsWith('access-control-') &&
                      lowerKey !== 'content-encoding' && // 很重要！
                      lowerKey !== 'content-length') {   // 很重要！
-                     res.setHeader(key, value); // 设置其他原始头
+                     res.setHeader(key, safeValue); // 设置其他原始头
                  }
              });
+            Object.entries(PROXY_SANDBOX_HEADERS).forEach(([key, value]) => res.setHeader(key, value));
             // 设置我们自己的缓存策略
             res.setHeader('Cache-Control', `public, max-age=${CACHE_TTL}`);
 

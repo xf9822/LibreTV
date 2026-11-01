@@ -349,6 +349,8 @@ html body .gradient-text {
     padding: 0 0.9rem;
     border-radius: 999px;
     font-size: 0.875rem;
+    white-space: nowrap;
+    flex-shrink: 0;
     color: var(--lt-muted);
     background: var(--lt-surface);
     border: 1px solid var(--lt-line);
@@ -1757,3 +1759,78 @@ html body .clash-rules-text {
 
 /* 豆瓣卡片：评分人数不足的新片 */
 .douban-unrated-badge { position: absolute; bottom: .5rem; left: .5rem; padding: .2rem .5rem; border-radius: 999px; font-size: .7rem; color: #a5adc4; background: rgba(0, 0, 0, .6); }
+
+/* iPhone / iPad：首页底部的「添加到主屏幕」提示 */
+.ios-install-hint {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--lt-line-strong);
+    border-radius: 14px;
+    background: var(--lt-surface-solid);
+    color: var(--lt-text);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+}
+.ios-install-hint-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.ios-install-hint-text small {
+    color: var(--lt-muted);
+    font-size: 12px;
+}
+.ios-install-hint-close { flex-shrink: 0; }
+
+/* 一键优选：测速结果 */
+.source-benchmark-result {
+    margin-bottom: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--lt-line);
+    border-radius: 10px;
+    background: var(--lt-surface-2);
+    font-size: 12px;
+    color: var(--lt-muted);
+}
+.source-benchmark-result[hidden] { display: none; }
+.source-benchmark-summary { color: var(--lt-text); line-height: 1.6; margin-bottom: 0.5rem; }
+.source-benchmark-undo { margin-bottom: 0.5rem; }
+.source-benchmark-details summary { cursor: pointer; }
+.source-benchmark-details ul { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 2px; }
+.source-benchmark-details li { display: flex; justify-content: space-between; gap: 8px; }
+.source-benchmark-details li.is-picked { color: var(--lt-text); }
+.source-benchmark-details li.is-failed { color: var(--lt-faint); text-decoration: line-through; }
+.api-speed-tag {
+    margin-left: 4px;
+    flex-shrink: 0;
+    font-size: 10px;
+    color: #34d399;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 电视模式（遥控器操作）：焦点要从几米外也看得清 */
+html.tv-mode :focus {
+    outline: 3px solid #a78bfa !important;
+    outline-offset: 3px;
+    box-shadow: 0 0 0 7px rgba(139, 92, 246, 0.35) !important;
+    border-radius: 10px;
+}
+html.tv-mode .card-hover:focus,
+html.tv-mode .douban-card:focus,
+html.tv-mode .player-episode-drawer button:focus {
+    transform: scale(1.05);
+    transition: transform 0.15s ease;
+}
+html.tv-mode .art-setting-item:focus { background: rgba(139, 92, 246, 0.35) !important; }
+html.tv-mode #castButton,
+html.tv-mode #downloadVideoButton,
+html.tv-mode .ios-install-hint { display: none !important; }

@@ -1,0 +1,5 @@
+# Windows 脚本检出时用 CRLF，仓库里按 LF 保存（CI 的空白检查不会把 CR 当成行尾空白）
+*.bat text eol=crlf
+# 二进制
+*.apk binary
+*.jar binary

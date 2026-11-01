@@ -224,3 +224,83 @@ test('saved progress is restored once per load so later seeks are not pulled bac
   assert.match(mobile, /event\.stopPropagation\(\);\n\s*const touch = event\.touches\[0\];/);
   assert.match(player, /document\.addEventListener\('keyup', handleKeyboardShortcutRelease\)/);
 });
+
+test('iPhone install hint explains the share menu per browser', async () => {
+  const source = await readFile(new URL('../js/ios-install.js', import.meta.url), 'utf8');
+  const sandbox = { window: {}, navigator: { userAgent: '', platform: 'iPhone', maxTouchPoints: 5 }, document: { readyState: 'complete', getElementById: () => null } };
+  vm.runInNewContext(source, sandbox);
+  const { steps, isAppleTouchDevice } = sandbox.window.IosInstallHint;
+  assert.match(steps('Mozilla/5.0 (iPhone) Version/17.5 Mobile Safari/604.1'), /分享.*添加到主屏幕/);
+  assert.match(steps('Mozilla/5.0 (iPhone) CriOS/130.0 Mobile'), /地址栏旁的「分享」/);
+  assert.match(steps('Mozilla/5.0 (iPhone) MicroMessenger/8.0'), /在 Safari 中打开/);
+  assert.equal(isAppleTouchDevice('Mozilla/5.0 (Linux; Android 14)', 'Linux', 5), false);
+  assert.equal(isAppleTouchDevice('Mozilla/5.0 (Macintosh)', 'MacIntel', 5), true, 'iPad reports itself as a Mac');
+});
+
+test('the Android app shell is wired to the site: cast bridge, cards and the published APK', async () => {
+  const { stat } = await import('node:fs/promises');
+  const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+  const [player, playerHtml, index, sw, manifest, activity, cast] = await Promise.all([
+    read('js/player.js'), read('player.html'), read('index.html'), read('service-worker.js'),
+    read('android/app/src/main/AndroidManifest.xml'), read('android/app/src/main/java/io/github/wxst/libretv/MainActivity.java'), read('js/app-cast.js')
+  ]);
+  assert.match(player, /LibreTVCast\?\.isApp && !window\.TVMode\?\.active \? '<button type="button" id="castButton"/);
+  assert.match(player, /LibreTVCast\?\.active\) window\.LibreTVCast\.follow/);
+  assert.match(playerHtml, /js\/app-cast\.js[\s\S]*js\/player\.js/);
+  assert.match(index, /id="androidAppDownloadCard"[\s\S]*href="\/download\/LibreTV\.apk"/);
+  assert.match(sw, /'\/js\/app-cast\.js'/);
+  assert.match(sw, /startsWith\('\/download\/'\)/, 'the APK is never cached by the service worker');
+  assert.match(manifest, /CHANGE_WIFI_MULTICAST_STATE/);
+  assert.match(activity, /addJavascriptInterface\(new Bridge\(\), "LibreTVApp"\)/);
+  assert.match(activity, /setMediaPlaybackRequiresUserGesture\(false\)/);
+  // The bridge methods the page calls exist on the Java side.
+  for (const method of ['discover', 'control', 'keepScreenOn', 'siteUrl', 'changeSite', 'version']) {
+    assert.match(activity, new RegExp(`public \\w+ ${method}\\(`), method);
+  }
+  for (const callback of ['onDevices', 'onResult']) assert.match(activity, new RegExp(`callPage\\("${callback}"`));
+  assert.match(cast, /onDevices,\s*onResult/);
+  assert.ok((await stat(new URL('../download/LibreTV.apk', import.meta.url))).size > 20000);
+});
+
+test('TV mode: detection, remote focus moves to the nearest element in that direction, and both APKs are offered', async () => {
+  const { stat } = await import('node:fs/promises');
+  const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+  const sandbox = {
+    window: {}, navigator: { userAgent: '' }, location: { search: '' },
+    localStorage: { getItem: () => null, setItem() {} },
+    document: { documentElement: { classList: { add() {} } }, getElementById: () => null, querySelectorAll: () => [] },
+    setInterval, clearInterval, setTimeout
+  };
+  vm.runInNewContext(await read('js/tv-mode.js'), sandbox);
+  const { detectTv, logic } = sandbox.window.TVMode;
+  assert.equal(detectTv('Mozilla/5.0 (Linux; Android 12; wv) Chrome/130 LibreTVApp/1.1.0-tv TV', ''), true);
+  assert.equal(detectTv('Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/130 Mobile LibreTVApp/1.1.0', ''), false);
+  assert.equal(detectTv('Mozilla/5.0 (Linux; Android 9; MIBOX4 Build/PI) Chrome/120', ''), true);
+  assert.equal(detectTv('Mozilla/5.0 (Windows NT 10.0) Chrome/130', '?tv=1'), true);
+  assert.equal(detectTv('Mozilla/5.0 (Linux; Android 9; MIBOX4) Chrome/120', '?tv=0'), false);
+
+  const box = (left, top, width = 100, height = 40) => ({ getBoundingClientRect: () => ({ left, top, right: left + width, bottom: top + height, width, height }), contains: () => false });
+  const from = box(100, 100);
+  const right = box(260, 105);
+  const farRightLower = box(240, 400);
+  const below = box(110, 200);
+  const above = box(400, 10);
+  const list = [from, right, farRightLower, below, above];
+  assert.equal(logic.nearest(from, list, 'right'), right);
+  assert.equal(logic.nearest(from, list, 'down'), below);
+  assert.equal(logic.nearest(from, list, 'up'), above);
+  assert.equal(logic.nearest(from, list, 'left'), null);
+
+  const [index, androidApp, activity, tvManifest, gradle] = await Promise.all([
+    read('index.html'), read('js/android-app.js'), read('android/app/src/main/java/io/github/wxst/libretv/MainActivity.java'),
+    read('android/app/src/tv/AndroidManifest.xml'), read('android/app/build.gradle')
+  ]);
+  assert.match(index, /href="\/download\/LibreTV\.apk"[\s\S]*href="\/download\/LibreTV-TV\.apk"/);
+  assert.match(androidApp, /function deviceKind/);
+  assert.match(activity, /LibreTVBack/);
+  assert.match(activity, /BuildConfig\.IS_TV \? " TV" : ""/);
+  assert.match(tvManifest, /LEANBACK_LAUNCHER/);
+  assert.match(tvManifest, /android:banner="@drawable\/tv_banner"/);
+  assert.match(gradle, /applicationIdSuffix '\.tv'/);
+  assert.ok((await stat(new URL('../download/LibreTV-TV.apk', import.meta.url))).size > 20000);
+});

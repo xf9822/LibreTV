@@ -65,6 +65,27 @@ test('a selected source is stopped only after repeated failures, and a healthy m
   assert.deepEqual(plain(outcome.disable), [], 'an adult source does not count as a searchable fallback');
 });
 
+test('adult, custom and restored sources are not stopped for an empty probe, and an outage run is ignored', async () => {
+  const { decide, isOutage } = (await load('js/source-autopilot.js', 'SourceAutopilot')).logic;
+  const healthy = days(['ok', 'ok', 'ok']);
+  const empty = days(['failed', 'failed', 'failed']);
+  const unreachable = empty.map(item => ({ ...item, reason: '无法访问' }));
+  const base = { ysgc: healthy, ffzy: healthy };
+
+  let outcome = decide({ history: { ...base, ckzy: empty, custom_0: empty }, selected: ['ysgc', 'ffzy', 'ckzy', 'custom_0'], siteMap });
+  assert.deepEqual(plain(outcome.disable), [], 'no title match on an adult or custom source is not a failure');
+  outcome = decide({ history: { ...base, custom_0: unreachable }, selected: ['ysgc', 'ffzy', 'custom_0'], siteMap });
+  assert.deepEqual(plain(outcome.disable).map(item => item.id), ['custom_0'], 'an unreachable custom source still stops');
+
+  outcome = decide({ history: { ...base, jszy: empty }, selected: ['ysgc', 'jszy'], siteMap, state: { kept: { jszy: 1 } } });
+  assert.deepEqual(plain(outcome.disable), [], 'a source restored by hand stays on');
+
+  const down = { status: 'failed', reason: '无法访问' };
+  assert.equal(isOutage([['a', down], ['b', down], ['c', { status: 'ok' }]]), true);
+  assert.equal(isOutage([['a', down], ['b', { status: 'ok' }], ['c', { status: 'ok' }]]), false);
+  assert.equal(isOutage([['a', down]]), false, 'one source alone is not an outage');
+});
+
 test('suggestions are healthy, unselected, not mirrors of a selected source and respect dismissals', async () => {
   const { decide } = (await load('js/source-autopilot.js', 'SourceAutopilot')).logic;
   const now = Date.parse('2026-10-28T12:00:00Z');
@@ -131,7 +152,7 @@ test('existing users lose removed sources and gain the new defaults once', async
   const app = await read('js/app.js');
   assert.match(app, /const stillAvailable = selectedAPIs\.filter\(apiId => apiId\.startsWith\('custom_'\) \|\| API_SITES\[apiId\]\)/);
   const config = await read('js/config.js');
-  assert.match(config, /DEFAULT_API_MIGRATION_VERSION = '20261028-sources-v3'/);
+  assert.match(config, /DEFAULT_API_MIGRATION_VERSION = '20261031-sources-v4'/);
   const douban = await read('js/douban.js');
   assert.doesNotMatch(douban, /API_SITES\.dbzy/);
   const index = await read('index.html');
@@ -141,4 +162,61 @@ test('existing users lose removed sources and gain the new defaults once', async
   }
   assert.match(index, /onclick="showClashRules\(\)"/);
   assert.match(index, /id="sourceAutopilotNotice"/);
+});
+
+test('config import skips malformed values and exports the newer settings', async () => {
+  const sandbox = { window: { DEFAULT_API_MIGRATION_VERSION: '1' }, console, sha256: async text => text.length.toString(16) };
+  vm.runInNewContext(await read('js/config-manager.js'), sandbox);
+  const { validateAndMigrateConfig, CONFIG_STORAGE_KEYS } = sandbox.window;
+  for (const key of ['watchLaterV1', 'userMovieTags', 'doubanFilterV1', 'danmakuMode']) assert.ok(CONFIG_STORAGE_KEYS.includes(key), key);
+
+  const result = await validateAndMigrateConfig({
+    name: 'LibreTV-Settings',
+    version: '2.0.0',
+    data: {
+      selectedAPIs: 'ysgc',
+      customAPIs: JSON.stringify([{ name: '<img src=x onerror=alert(1)>', url: 'javascript:alert(1)' }]),
+      viewingHistory: JSON.stringify([{ title: 'a', episodeIndex: '1<script>' }]),
+      watchLaterV1: JSON.stringify([{ title: 'b' }]),
+      doubanEnabled: 'true'
+    }
+  });
+  assert.deepEqual(Object.keys(result.data).sort(), ['defaultApiMigrationVersion', 'doubanEnabled', 'hasInitializedDefaults', 'watchLaterV1']);
+  assert.equal(result.migrationMessages.filter(text => text.startsWith('已跳过')).length, 3);
+});
+
+test('one-tap optimisation picks the fastest source of each family and keeps custom sources', async () => {
+  const { logic } = await load('js/source-benchmark.js', 'SourceBenchmark');
+  const { choose, weeklySwaps, firstEpisodeUrl, speedScore } = logic;
+  const map = {
+    a: { name: 'A' }, b: { name: 'B', family: 'x' }, c: { name: 'C', family: 'x' }, d: { name: 'D' }, e: { name: 'E' },
+    p: { name: 'P', adult: true }, q: { name: 'Q', adult: true }
+  };
+  const results = {
+    a: { ok: true, kbps: 500 }, b: { ok: true, kbps: 3000 }, c: { ok: true, kbps: 2000 }, d: { ok: false, reason: '无法访问' },
+    e: { ok: true, kbps: 0, searchMs: 800 }, p: { ok: true, kbps: 900 }, q: { ok: false }
+  };
+  let outcome = choose({ results, siteMap: map, selected: ['a', 'd', 'custom_0'], pick: 3 });
+  assert.deepEqual(plain(outcome.selected), ['b', 'a', 'e', 'custom_0'], 'one per family, fastest first, failed dropped, custom kept');
+  assert.deepEqual(plain(outcome.removed), ['d']);
+  assert.equal(outcome.changed, true);
+
+  outcome = choose({ results, siteMap: map, selected: ['a', 'q'], pick: 2, adultPick: 2 });
+  assert.deepEqual(plain(outcome.selected), ['b', 'a', 'p'], 'adult sources are re-picked only when some were selected');
+  assert.equal(choose({ results: { d: { ok: false } }, siteMap: map, selected: ['a'] }).changed, false, 'nothing reachable: change nothing');
+  // Too few playable sources (a flaky network): fill up with ones that at least search, fastest search first.
+  outcome = choose({
+    results: { a: { ok: true, kbps: 900 }, d: { ok: false, searchOk: true, searchMs: 900 }, e: { ok: false, searchOk: true, searchMs: 300 }, b: { ok: false } },
+    siteMap: map, selected: ['a'], pick: 3
+  });
+  assert.deepEqual(plain(outcome.selected), ['a', 'e', 'd']);
+
+  const weekly = weeklySwaps({ results: { ...results, a: { ok: true, kbps: 400 }, e: { ok: true, kbps: 2500 } }, siteMap: map, selected: ['a', 'b'] });
+  assert.deepEqual(plain(weekly.swaps), [{ from: 'a', to: 'e', reason: '明显变慢' }]);
+  assert.equal(weeklySwaps({ results, siteMap: map, selected: ['b', 'c'] }).swaps.length, 0, 'healthy picks stay');
+
+  assert.equal(firstEpisodeUrl('第1集$https://v.example/a/index.m3u8#第2集$https://v.example/b/index.m3u8'), 'https://v.example/a/index.m3u8');
+  assert.equal(firstEpisodeUrl('HD$https://share.example/play/abc$$$第1集$https://cdn.example/1.mp4'), 'https://cdn.example/1.mp4');
+  assert.ok(speedScore({ ok: true, kbps: 10 }) > speedScore({ ok: true, kbps: 0, searchMs: 10 }));
+  assert.equal(speedScore({ ok: false }), -1);
 });

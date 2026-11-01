@@ -5,6 +5,8 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
+import dns from 'dns';
+import net from 'net';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -53,15 +55,22 @@ function sha256Hash(input) {
   });
 }
 
-async function renderPage(filePath, password) {
-  let content = fs.readFileSync(filePath, 'utf8');
-  if (password !== '') {
-    const sha256 = await sha256Hash(password);
-    content = content.replace('{{PASSWORD}}', sha256);
-  } else {
-    content = content.replace('{{PASSWORD}}', '');
-  }
-  return content;
+// 页面里注入的密码哈希：优先用 PASSWORD_HASH（不留明文的部署方式），否则由 PASSWORD 计算
+async function pagePasswordHash() {
+  const configuredHash = config.passwordHash.trim().toLowerCase();
+  if (/^[a-f0-9]{64}$/.test(configuredHash)) return configuredHash;
+  return config.password !== '' ? sha256Hash(config.password) : '';
+}
+
+async function renderPage(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  return content.replace('{{PASSWORD}}', await pagePasswordHash());
+}
+
+// 页面每次都向服务器确认，发版后不会拿到旧页面配新脚本
+function sendPage(res, content) {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.send(content);
 }
 
 app.get(['/', '/index.html', '/player.html', '/diagnostics.html'], async (req, res) => {
@@ -79,8 +88,8 @@ app.get(['/', '/index.html', '/player.html', '/diagnostics.html'], async (req, r
         break;
     }
     
-    const content = await renderPage(filePath, config.password);
-    res.send(content);
+    const content = await renderPage(filePath);
+    sendPage(res, content);
   } catch (error) {
     console.error('页面渲染错误:', error);
     res.status(500).send('读取静态页面失败');
@@ -90,13 +99,74 @@ app.get(['/', '/index.html', '/player.html', '/diagnostics.html'], async (req, r
 app.get('/s=:keyword', async (req, res) => {
   try {
     const filePath = path.join(__dirname, 'index.html');
-    const content = await renderPage(filePath, config.password);
-    res.send(content);
+    const content = await renderPage(filePath);
+    sendPage(res, content);
   } catch (error) {
     console.error('搜索页面渲染错误:', error);
     res.status(500).send('读取静态页面失败');
   }
 });
+
+// 内网与保留地址：代理不能被用来访问服务器所在的内网或云厂商的元数据接口。
+// 224.0.0.0/4 不在其中：设置 PROXY_URL 时 proxychains 的 proxy_dns 会把域名解析成这个网段的占位地址。
+function isPrivateAddress(address) {
+  let ip = String(address || '').toLowerCase();
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 192 && b === 0) ||
+      (a === 198 && (b === 18 || b === 19));
+  }
+  if (net.isIPv6(ip)) {
+    return ip === '::' || ip === '::1' || /^f[cd]/.test(ip) || /^fe[89ab]/.test(ip);
+  }
+  return false;
+}
+
+const usesEnvProxy = Boolean(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy);
+
+// 每次建立连接（包括跳转后的地址）都检查解析出的 IP，域名指向内网或跳转到内网都会被拒绝
+function safeLookup(hostname, options, callback) {
+  dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
+    if (error) return callback(error);
+    if (!addresses.length || addresses.some(item => isPrivateAddress(item.address))) {
+      return callback(new Error('目标地址指向内网，已拒绝'));
+    }
+    if (options.all) return callback(null, addresses);
+    return callback(null, addresses[0].address, addresses[0].family);
+  });
+}
+
+// 代理返回的内容出现在本站域名下：上游网页或脚本不能在这里运行，也不能写 Cookie、注册
+// Service Worker。网页 / 脚本类内容改成纯文本（前端用 fetch 读取不受影响），并统一加上沙箱。
+const DROPPED_PROXY_HEADERS = new Set([
+  'set-cookie', 'service-worker-allowed', 'clear-site-data', 'refresh', 'link',
+  'content-security-policy', 'x-frame-options', 'access-control-allow-origin',
+  // 上游压缩过的内容已被解压、改成分块传输，原来的长度与编码不再适用
+  'content-length', 'content-encoding', 'transfer-encoding', 'connection', 'keep-alive'
+]);
+
+function proxyResponseHeaders(upstreamHeaders) {
+  const extra = (process.env.FILTERED_HEADERS || '').split(',').map(name => name.trim().toLowerCase()).filter(Boolean);
+  const headers = {};
+  for (const [key, value] of Object.entries(upstreamHeaders || {})) {
+    const lowerKey = key.toLowerCase();
+    if (DROPPED_PROXY_HEADERS.has(lowerKey) || extra.includes(lowerKey) || value === undefined) continue;
+    headers[lowerKey] = value;
+  }
+  const contentType = String(headers['content-type'] || '');
+  if (/html|xml|javascript|ecmascript/i.test(contentType) && !/svg/i.test(contentType)) {
+    headers['content-type'] = 'text/plain; charset=utf-8';
+  }
+  headers['x-content-type-options'] = 'nosniff';
+  headers['content-security-policy'] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+  return headers;
+}
 
 function isValidUrl(urlString) {
   try {
@@ -110,7 +180,9 @@ function isValidUrl(urlString) {
     const blockedPrefixes = (process.env.BLOCKED_IP_PREFIXES || '192.168.,10.,172.').split(',');
     
     if (!allowedProtocols.includes(parsed.protocol)) return false;
-    if (blockedHostnames.includes(parsed.hostname)) return false;
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+    if (blockedHostnames.includes(parsed.hostname) || blockedHostnames.includes(hostname)) return false;
+    if (hostname === 'localhost' || hostname.endsWith('.localhost') || isPrivateAddress(hostname)) return false;
     
     for (const prefix of blockedPrefixes) {
       if (parsed.hostname.startsWith(prefix)) return false;
@@ -194,8 +266,17 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
       });
     }
 
-    const encodedUrl = req.params.encodedUrl;
-    const targetUrl = decodeURIComponent(encodedUrl);
+    // Express 已经解码过路径参数，这里不能再解码一次，否则地址里的 %2B、%26 等会被改坏
+    const targetUrl = req.params.encodedUrl;
+    const probe = req.query.probe === '1';
+    const range = String(req.headers.range || '');
+    // 测速只读开头至多 2 MiB，与 Cloudflare 版代理一致
+    if (probe) {
+      const rangeEnd = /^bytes=0-(\d+)$/.exec(range);
+      if (!rangeEnd || Number(rangeEnd[1]) > 2097151) {
+        return res.status(400).set('Cache-Control', 'no-store').send('无效的测速范围');
+      }
+    }
 
     // 安全验证
     if (!isValidUrl(targetUrl)) {
@@ -215,10 +296,15 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
           url: targetUrl,
           responseType: 'stream',
           timeout: config.timeout,
+          // 通过 HTTP(S)_PROXY 出站时目标由代理解析，这里只能检查地址本身
+          ...(usesEnvProxy ? {} : { lookup: safeLookup }),
+          maxRedirects: 5,
           headers: {
             'User-Agent': config.userAgent,
             'Referer': getTargetReferer(targetUrl),
-            'Accept': '*/*'
+            'Accept': '*/*',
+            // 拖动 MP4 进度与测速都依赖分段请求
+            ...(range ? { Range: range } : {})
           }
         });
       } catch (error) {
@@ -234,13 +320,9 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
     const response = await makeRequest();
 
     // 转发响应头（过滤敏感头）
-    const headers = { ...response.headers };
-    const sensitiveHeaders = (
-      process.env.FILTERED_HEADERS || 
-      'content-security-policy,cookie,set-cookie,x-frame-options,access-control-allow-origin'
-    ).split(',');
-    
-    sensitiveHeaders.forEach(header => delete headers[header]);
+    const headers = proxyResponseHeaders(response.headers);
+    if (probe) headers['cache-control'] = 'no-store';
+    res.status(response.status);
     res.set(headers);
 
     // 管道传输响应流
@@ -249,6 +331,7 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
     console.error('代理请求错误:', error.message);
     if (error.response) {
       res.status(error.response.status || 500);
+      res.set(proxyResponseHeaders(error.response.headers));
       error.response.data.pipe(res);
     } else {
       res.status(500).send(`请求失败: ${error.message}`);
@@ -256,8 +339,16 @@ app.get('/proxy/:encodedUrl', async (req, res) => {
   }
 });
 
+// 第三方库与图片很少变，可以长缓存；本站的页面、脚本、样式和 Service Worker 每次都要确认，
+// 否则发版后浏览器会把新页面和缓存里的旧脚本混在一起用。
 app.use(express.static(path.join(__dirname), {
-  maxAge: config.cacheMaxAge
+  maxAge: config.cacheMaxAge,
+  setHeaders(res, filePath) {
+    const relative = path.relative(__dirname, filePath).split(path.sep).join('/');
+    if (!relative.startsWith('libs/') && !relative.startsWith('image/')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
 }));
 
 app.use((err, req, res, next) => {

@@ -17,12 +17,12 @@ const SITE_CONFIG = {
     url: '',
     description: '免费在线视频搜索与观看平台',
     logo: 'image/logo.png',
-    version: '1.2.47'
+    version: '1.2.58'
 };
 
 const DEFAULT_SELECTED_APIS = ['ysgc', 'ffzy', 'bfzy', 'jszy', 'wujin'];
 const DEFAULT_API_MIGRATION_KEY = 'defaultApiMigrationVersion';
-const DEFAULT_API_MIGRATION_VERSION = '20261028-sources-v3';
+const DEFAULT_API_MIGRATION_VERSION = '20261031-sources-v4';
 
 function escapeHtmlAttr(value) {
     return String(value ?? '')
@@ -132,15 +132,6 @@ window.setImagePlaceholder = setImagePlaceholder;
 window.getCustomApiInfo = getCustomApiInfo;
 
 
-// 添加聚合搜索的配置选项
-const AGGREGATED_SEARCH_CONFIG = {
-    enabled: true,             // 是否启用聚合搜索
-    timeout: 8000,            // 单个源超时时间（毫秒）
-    maxResults: 10000,          // 最大结果数量
-    parallelRequests: true,   // 是否并行请求所有源
-    showSourceBadges: true    // 是否显示来源徽章
-};
-
 // 抽象API请求配置
 const API_CONFIG = {
     search: {
@@ -199,18 +190,6 @@ const SECURITY_CONFIG = {
     sanitizeUrls: true,         // 是否清理URL
     maxQueryLength: 100,        // 最大搜索长度
     // allowedApiDomains 不再需要，因为所有请求都通过内部代理
-};
-
-// 添加多个自定义API源的配置
-const CUSTOM_API_CONFIG = {
-    separator: ',',           // 分隔符
-    maxSources: 5,            // 最大允许的自定义源数量
-    testTimeout: 5000,        // 测试超时时间(毫秒)
-    namePrefix: 'Custom-',    // 自定义源名称前缀
-    validateUrl: true,        // 验证URL格式
-    cacheResults: true,       // 缓存测试结果
-    cacheExpiry: 5184000000,  // 缓存过期时间(2个月)
-    adultPropName: 'isAdult' // 用于标记成人内容的属性名
 };
 
 // 隐藏内置黄色采集站API的变量

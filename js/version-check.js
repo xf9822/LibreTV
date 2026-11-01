@@ -108,27 +108,26 @@ async function checkForUpdates() {
     }
 }
 
-// 格式化版本号为可读形式 (yyyyMMddhhmm -> yyyy-MM-dd hh:mm)
+// 格式化版本号为可读形式 (yyyyMMddhhmm -> yyyy-MM-dd hh:mm)。
+// 版本号记录的是 UTC 发布时间，这里换算成访问者所在时区显示。
 function formatVersion(versionString) {
     // 检测版本字符串是否有效
     if (!versionString) {
         return '未知版本';
     }
-    
+
     // 清理版本字符串（移除可能的空格或换行符）
     const cleanedString = versionString.trim();
-    
-    // 格式化标准12位版本号
-    if (cleanedString.length === 12) {
-        const year = cleanedString.substring(0, 4);
-        const month = cleanedString.substring(4, 6);
-        const day = cleanedString.substring(6, 8);
-        const hour = cleanedString.substring(8, 10);
-        const minute = cleanedString.substring(10, 12);
-        
-        return `${year}-${month}-${day} ${hour}:${minute}`;
+
+    const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(cleanedString);
+    if (match) {
+        const [, year, month, day, hour, minute] = match.map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+        if (Number.isNaN(date.getTime())) return cleanedString;
+        const pad = value => String(value).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     }
-    
+
     return cleanedString;
 }
 

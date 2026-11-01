@@ -3,6 +3,7 @@ const CUSTOMER_SITES = {
     ysgc: {
         api: 'https://cj.lziapi.com/api.php/provide/vod',
         name: '影视工厂',
+        family: 'liangzi',
     },
     ffzy: {
         api: 'https://api.ffzyapi.com/api.php/provide/vod',
@@ -20,6 +21,7 @@ const CUSTOMER_SITES = {
     wujin: {
         api: 'https://api.wujinapi.com/api.php/provide/vod',
         name: '无尽资源',
+        family: 'wujin',
     },
     // 可选
     zuid: {
@@ -33,6 +35,7 @@ const CUSTOMER_SITES = {
     mdzy: {
         api: 'https://www.mdzyapi.com/api.php/provide/vod',
         name: '魔都资源',
+        family: 'modu',
     },
     baidu: {
         api: 'https://api.apibdzy.com/api.php/provide/vod',
@@ -53,6 +56,31 @@ const CUSTOMER_SITES = {
     maoyan: {
         api: 'https://api.maoyanapi.top/api.php/provide/vod',
         name: '猫眼资源',
+    },
+    // 2026-10-31 新增：片库与上面各站都不同
+    aidan: {
+        api: 'https://lovedan.net/api.php/provide/vod',
+        name: '爱蛋资源',
+    },
+    yzzy: {
+        api: 'https://api.yzzy-api.com/inc/apijson.php',
+        name: '优质资源',
+    },
+    // 备用线路：与上面某个站是同一家（片库相同、CDN 不同），一键优选只会在同一家里留最快的一个
+    lzcaiji: {
+        api: 'https://cj.lzcaiji.com/api.php/provide/vod',
+        name: '量子资源',
+        family: 'liangzi',
+    },
+    wujinme: {
+        api: 'https://api.wujinapi.me/api.php/provide/vod',
+        name: '无尽资源（备用）',
+        family: 'wujin',
+    },
+    modu: {
+        api: 'https://caiji.moduapi.cc/api.php/provide/vod',
+        name: '魔都资源（备用）',
+        family: 'modu',
     },
     // 与极速资源同一家的镜像站（片库、编号相同，只是 CDN 不同），选一个即可，其余作备用
     huya: {
@@ -80,6 +108,11 @@ const CUSTOMER_SITES = {
         name: '豪华资源',
         family: 'jisu',
     },
+    xinlang: {
+        api: 'https://api.xinlangapi.com/xinlangapi.php/provide/vod',
+        name: '新浪资源',
+        family: 'jisu',
+    },
     ckzy: {
         api: 'https://www.ckzy1.com/api.php/provide/vod',
         name: 'CK资源',
@@ -88,11 +121,6 @@ const CUSTOMER_SITES = {
     jkun: {
         api: 'https://jkunzyapi.com/api.php/provide/vod',
         name: 'jKun资源',
-        adult: true,
-    },
-    bwzy: {
-        api: 'https://api.bwzyz.com/api.php/provide/vod',
-        name: '百万资源',
         adult: true,
     },
     r155: {
@@ -104,17 +132,24 @@ const CUSTOMER_SITES = {
         api: 'https://hsckzy.vip/api.php/provide/vod',
         name: '黄色仓库',
         adult: true,
+        family: 'hsck',
     },
     yutu: {
         api: 'https://yutuzy10.com/api.php/provide/vod',
         name: '玉兔资源',
         adult: true,
+        family: 'yutu',
     },
-    siwa: {
-        api: 'https://siwazyw.tv/api.php/provide/vod',
-        name: '丝袜资源',
-        adult: true,
-    }
+    // 2026-10-31 新增（视频实测可下载）；百万、丝袜已失效移除
+    aosika: { api: 'https://aosikazy.com/api.php/provide/vod', name: '奥斯卡资源', adult: true },
+    lajiao: { api: 'https://apilj.com/api.php/provide/vod', name: '辣椒资源', adult: true },
+    lbzy: { api: 'https://lbapi9.com/api.php/provide/vod', name: '乐播资源', adult: true },
+    naixiang: { api: 'https://naixxzy.com/api.php/provide/vod', name: '奶香资源', adult: true },
+    shayu: { api: 'https://shayuapi.com/api.php/provide/vod', name: '鲨鱼资源', adult: true },
+    senlin: { api: 'https://slapibf.com/api.php/provide/vod', name: '森林资源', adult: true },
+    xingba: { api: 'https://xingba111.com/api.php/provide/vod', name: '杏吧资源', adult: true },
+    hsck2: { api: 'https://hsckzy888.com/api.php/provide/vod', name: '黄色仓库（备用）', adult: true, family: 'hsck' },
+    yutu2: { api: 'https://apilsbzy1.com/api.php/provide/vod', name: '玉兔资源（备用）', adult: true, family: 'yutu' }
 };
 
 // 调用全局方法合并

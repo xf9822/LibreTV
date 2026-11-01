@@ -56,11 +56,39 @@
             </button>
         </div>
         <div class="space-y-4">
+            <!-- iPhone / iPad：添加到主屏幕的说明（只在苹果触屏设备、且不是从主屏幕打开时显示） -->
+            <div id="iosInstallCard" class="lt-card" hidden>
+                <label class="lt-card-title">添加到主屏幕</label>
+                <p class="ios-install-steps text-sm text-gray-300 mb-1"></p>
+                <p class="text-xs text-gray-500">从主屏幕打开没有浏览器地址栏和工具栏，用起来像独立 App。</p>
+            </div>
+            <!-- LibreTV 安卓 App 里：当前网站地址与更换入口 -->
+            <div id="androidAppSettingsCard" class="lt-card" hidden>
+                <label class="lt-card-title">App 设置</label>
+                <p class="text-sm text-gray-300 mb-1">网站地址：<span class="android-app-site break-all"></span></p>
+                <p class="text-xs text-gray-500 mb-3">App 版本 <span class="android-app-version"></span>。播放页的「投屏」可以把视频投到同一 Wi-Fi 下的电视。</p>
+                <button type="button" class="lt-btn lt-btn-sm android-app-change-site">更换网站地址</button>
+            </div>
+            <!-- 下载安卓 App：手机版 / 电视版，按当前设备推荐其中一个 -->
+            <div id="androidAppDownloadCard" class="lt-card" hidden>
+                <label class="lt-card-title">安卓 App</label>
+                <p class="text-sm text-gray-300 mb-1"><b>手机版</b>：一键投屏到电视（DLNA），打开视频直接有声播放，全屏自动横屏。</p>
+                <p class="text-sm text-gray-300 mb-1"><b>电视版</b>：装在安卓电视或电视盒子上，用遥控器操作，出现在电视桌面。</p>
+                <p class="text-xs text-gray-500 mb-3 android-app-hint">第一次打开时输入本站网址即可，网站更新后 App 里自动生效。</p>
+                <div class="flex flex-wrap gap-2">
+                    <a class="lt-btn lt-btn-sm android-app-phone" href="/download/LibreTV.apk" download>下载手机版</a>
+                    <a class="lt-btn lt-btn-sm android-app-tv" href="/download/LibreTV-TV.apk" download>下载电视版</a>
+                </div>
+            </div>
             <!-- 数据源设置区域 -->
             <div class="lt-card">
                 <label class="lt-card-title">数据源设置</label>
                 <!-- 每日自动体检的结果：自动停用 / 推荐启用 -->
                 <div id="sourceAutopilotNotice" class="source-autopilot-notice" hidden></div>
+
+                <!-- 一键优选：在本机网络下测速，自动选上最快的资源站 -->
+                <button type="button" id="sourceBenchmarkButton" class="lt-btn lt-btn-primary lt-btn-block mb-2">一键优选（测速并选上最快的源）</button>
+                <div id="sourceBenchmarkResult" class="source-benchmark-result" hidden></div>
 
                 <!-- 批量操作按钮 -->
                 <div class="flex flex-wrap gap-2 mb-3">
@@ -173,7 +201,7 @@
                     <button onclick="exportConfig()" class="lt-btn lt-btn-primary">导出配置</button>
                 </div>
                 <button onclick="showFirstRunGuide(true)" class="lt-btn lt-btn-block mb-2">首次使用指南</button>
-                <button onclick="window.location.href='diagnostics.html'" class="lt-btn lt-btn-block mb-2">检测源</button>
+                <button onclick="window.location.href='diagnostics.html'" class="lt-btn lt-btn-block mb-2">诊断页（密码、代理、资源站详细检测）</button>
                 <button onclick="clearLocalStorage()" class="lt-btn lt-btn-block lt-btn-danger">清除Cookie</button>
             </div>
         </div>
@@ -254,7 +282,7 @@
                 <button type="button" class="lt-btn lt-btn-sm" onclick="enableHomeRecommendations()">开启热门推荐</button>
             </section>
             <section id="continueWatching" class="lt-section hidden" aria-label="继续观看">
-                <div class="lt-section-head"><h2 class="lt-section-title">继续观看</h2><button type="button" class="lt-btn lt-btn-sm" onclick="toggleHistory()">全部历史</button></div>
+                <div class="lt-section-head"><h2 class="lt-section-title">继续观看</h2><button type="button" class="lt-btn lt-btn-sm" onclick="toggleHistory(event)">全部历史</button></div>
                 <div id="continueWatchingList" class="continue-watching-list"></div>
             </section>
 
@@ -459,6 +487,7 @@
     <script src="js/quick-play.js"></script>
     <script src="js/source-availability.js"></script>
     <script src="js/source-autopilot.js"></script>
+    <script src="js/source-benchmark.js"></script>
     <script src="js/source-hosts.js"></script>
     <script src="js/experience.js"></script>
     <script src="js/episode-context.js"></script>
@@ -469,7 +498,10 @@
     <script src="js/app.js"></script>
 
     <!-- PWA 注册 -->
+    <script src="js/tv-mode.js"></script>
     <script src="js/pwa-register.js"></script>
+    <script src="js/ios-install.js"></script>
+    <script src="js/android-app.js"></script>
 
     <!-- 环境变量注入脚本 -->
     <script>

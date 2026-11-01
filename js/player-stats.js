@@ -184,6 +184,7 @@
                 ['音量 / 倍速', `${video.muted ? '静音' : `${Math.round((video.volume || 0) * 100)}%`} / ${video.playbackRate || 1}x`]
             ];
             if (info.enhance) list.push(['画质增强', info.enhance]);
+            if (info.danmaku) list.push(['弹幕', info.danmaku]);
             let html = list.map(([label, value]) => `<dt>${label}</dt><dd>${escapeHtml(value)}</dd>`).join('');
             if (hls) {
                 html += graphRow('speed', '连接速度', formatBits(speed), '');

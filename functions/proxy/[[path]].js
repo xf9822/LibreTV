@@ -130,17 +130,6 @@ export async function onRequest(context) {
         return true;
     }
 
-    // 验证鉴权（主函数调用）
-    if (!validateAuth(request, env)) {
-        return new Response('Unauthorized', { 
-            status: 401,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-                'Access-Control-Allow-Headers': '*'
-            }
-        });
-    }
 
     // 输出调试日志 (需要设置 DEBUG: true 环境变量)
     function logDebug(message) {
@@ -180,7 +169,7 @@ export async function onRequest(context) {
 
     // 创建标准化的响应
     function createResponse(body, status = 200, headers = {}) {
-        const responseHeaders = new Headers(headers);
+        const responseHeaders = hardenProxyHeaders(new Headers(headers));
         // 关键：添加 CORS 跨域头，允许前端 JS 访问代理后的响应
         responseHeaders.set("Access-Control-Allow-Origin", "*"); // 允许任何来源访问
         responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS"); // 允许的方法
@@ -199,6 +188,21 @@ export async function onRequest(context) {
     }
 
     // 创建 M3U8 类型的响应
+    // 代理返回的内容出现在本站域名下：上游网页或脚本不能在这里运行，也不能写 Cookie、注册
+    // Service Worker。网页 / 脚本类内容改成纯文本（前端用 fetch 读取不受影响），并统一加上沙箱。
+    const ACTIVE_CONTENT = /html|xml|javascript|ecmascript/i;
+    const DROPPED_HEADERS = ['set-cookie', 'service-worker-allowed', 'clear-site-data', 'refresh', 'link', 'content-security-policy', 'x-frame-options'];
+    function hardenProxyHeaders(headers) {
+        DROPPED_HEADERS.forEach(name => headers.delete(name));
+        const contentType = headers.get('content-type') || '';
+        if (ACTIVE_CONTENT.test(contentType) && !/svg/i.test(contentType)) {
+            headers.set('content-type', 'text/plain; charset=utf-8');
+        }
+        headers.set('X-Content-Type-Options', 'nosniff');
+        headers.set('Content-Security-Policy', "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+        return headers;
+    }
+
     function createM3u8Response(content) {
         return createResponse(content, 200, {
             "Content-Type": "application/vnd.apple.mpegurl", // M3U8 的标准 MIME 类型

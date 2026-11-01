@@ -1,5 +1,14 @@
-const selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || JSON.stringify(DEFAULT_SELECTED_APIS));
-const customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]'); // 存储自定义API列表
+// 本地设置损坏时回到默认值，不能让播放页脚本因此中断
+function readStoredList(key, fallback) {
+    try {
+        const value = JSON.parse(localStorage.getItem(key) || 'null');
+        return Array.isArray(value) ? value : fallback;
+    } catch (error) {
+        return fallback;
+    }
+}
+const selectedAPIs = readStoredList('selectedAPIs', [...DEFAULT_SELECTED_APIS]);
+const customAPIs = readStoredList('customAPIs', []); // 存储自定义API列表
 
 // 顶栏搜索：跳到首页的搜索结果（首页会把 ?s= 规范成 /s=）
 function submitPlayerSearch(event) {
@@ -28,6 +37,21 @@ function togglePlayerSearch(open) {
     }
 }
 
+function sameOriginUrl(value) {
+    if (!value) return '';
+    let candidate = String(value);
+    // 旧链接里的 returnUrl 可能被多编码了一层（http%3A%2F%2F… 或 %2F…）
+    if (/^(https?%3A|%2F)/i.test(candidate)) {
+        try { candidate = decodeURIComponent(candidate); } catch (e) { return ''; }
+    }
+    try {
+        const url = new URL(candidate, window.location.origin);
+        return url.origin === window.location.origin ? url.href : '';
+    } catch (e) {
+        return '';
+    }
+}
+
 // 改进返回功能
 function goBack(event) {
     // 防止默认链接行为
@@ -37,14 +61,15 @@ function goBack(event) {
     const urlParams = new URLSearchParams(window.location.search);
     const returnUrl = urlParams.get('returnUrl');
     
-    if (returnUrl) {
-        // 如果URL中有returnUrl参数，优先使用
-        window.location.href = decodeURIComponent(returnUrl);
+    // 只接受本站地址：javascript: 链接或外站地址都不能借「返回」打开
+    const safeReturnUrl = sameOriginUrl(returnUrl);
+    if (safeReturnUrl) {
+        window.location.href = safeReturnUrl;
         return;
     }
     
     // 2. 检查localStorage中保存的lastPageUrl
-    const lastPageUrl = localStorage.getItem('lastPageUrl');
+    const lastPageUrl = sameOriginUrl(localStorage.getItem('lastPageUrl'));
     if (lastPageUrl && lastPageUrl !== window.location.href) {
         window.location.href = lastPageUrl;
         return;
@@ -114,7 +139,6 @@ let currentEpisodeNames = [];
 let episodesReversed = false;
 let autoplayEnabled = true; // 默认开启自动连播
 let videoHasEnded = false; // 跟踪视频是否已经自然结束
-let userClickedPosition = null; // 记录用户点击的位置
 let shortcutHintTimeout = null; // 用于控制快捷键提示显示时间
 let adFilteringEnabled = true; // 默认开启广告过滤
 let progressSaveInterval = null; // 定期保存进度的计时器
@@ -140,6 +164,8 @@ let skipMarks = { enabled: true, intro: 0, outro: 0 }; // 当前剧集的片头�
 let playerStats = null; // 「统计信息」面板（网络、缓冲、分片）
 let statsTracker = null; // 当前 HLS 实例的下载统计
 let videoEnhancer = null; // 画质增强（WebGL FSR 放大 + 锐化）
+let danmakuPlugin = null; // 弹幕渲染（artplayer-plugin-danmuku）
+const danmakuState = { key: '', controller: null, result: null, status: '', lastOnMode: 'normal', queued: new Set() };
 // ready：新一集的元数据加载完成前，video.currentTime 仍是上一集的进度，不能据此跳过或预加载
 let skipState = { introDone: false, outroDone: false, preloaded: false, ready: false };
 let nextEpisodePreloadController = null;
@@ -342,24 +368,50 @@ function restorePlaybackPosition() {
     if (Number.isFinite(duration) && duration > 0) playbackRestoreApplied = true;
 }
 
+// 浏览器（尤其 iPhone）只允许在用户点过当前页面后播放有声视频，从首页点进播放页不算，所以先静音播放。
+// 画面上放一个「点按开启声音」按钮；点页面任何地方（或按任意键）都会恢复声音。
 function showAutoplayMutedNotice() {
     if (autoplayMutedNoticeShown) return;
     autoplayMutedNoticeShown = true;
 
-    if (typeof showToast === 'function') {
-        showToast('已静音自动播放，点击播放器恢复声音', 'success');
+    const host = art?.template?.$player;
+    let button = null;
+    if (host) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'autoplay-unmute';
+        button.setAttribute('aria-label', '已静音自动播放，点按开启声音');
+        button.innerHTML = '<span aria-hidden="true">🔇</span> 点按开启声音';
+        host.appendChild(button);
     } else if (art && art.notice) {
         art.notice.show = '已静音自动播放，点击播放器恢复声音';
     }
 
-    const restoreSoundOnClick = () => {
+    // 只用点按（click）和按键：滑动页面结束时的 touchend 不算用户操作，此时取消静音 iPhone 会直接把视频暂停
+    const events = ['click', 'keydown'];
+    const cleanup = () => {
+        events.forEach(name => document.removeEventListener(name, restoreSound, true));
+        art?.video?.removeEventListener('volumechange', onVolumeChange);
+        button?.remove();
+    };
+    function restoreSound(event) {
+        if (event.type === 'keydown' && event.key === 'Escape') return;
         if (art && art.video) {
             art.muted = false;
             art.video.muted = false;
         }
-        document.removeEventListener('click', restoreSoundOnClick, true);
-    };
-    document.addEventListener('click', restoreSoundOnClick, true);
+        // 点的是这个按钮：只开声音，不要再触发画面上的暂停 / 显示控制栏
+        if (button && event.target?.closest?.('.autoplay-unmute')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
+        cleanup();
+    }
+    function onVolumeChange() {
+        if (art?.video && !art.video.muted) cleanup();
+    }
+    events.forEach(name => document.addEventListener(name, restoreSound, true));
+    art?.video?.addEventListener('volumechange', onVolumeChange);
 }
 
 function tryStartPlayback() {
@@ -390,6 +442,8 @@ function tryStartPlayback() {
 }
 
 function isMobilePlaybackDevice() {
+    // 电视版：遥控器操作，按电脑版的界面和逻辑来（没有触屏手势层，弹幕用大字号）
+    if (window.TVMode?.active) return false;
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
@@ -487,8 +541,57 @@ function unlockLandscapeOrientation() {
     }
 }
 
+// iPhone 的 Safari 不能把网页元素全屏，只能「网页全屏」（地址栏和工具栏还在）；视频本身可以进入
+// 系统全屏，这才是真正的全屏。系统播放器里看不到弹幕和手势层，所以设置里另留「网页全屏」可选。
+function usesNativeVideoFullscreen() {
+    return !document.fullscreenEnabled && !document.webkitFullscreenEnabled &&
+        typeof art?.video?.webkitEnterFullscreen === 'function';
+}
+
+function enterNativeVideoFullscreen() {
+    if (!usesNativeVideoFullscreen()) return false;
+    try {
+        if (art.fullscreenWeb) art.fullscreenWeb = false;
+        art.video.webkitEnterFullscreen();
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// 进入系统全屏时，画质增强的画布不在系统播放器里，先关掉（视频本身是隐藏在画布下面的），退出后恢复
+function setupNativeFullscreenHandoff(video) {
+    let enhanceMode = 'off';
+    video.addEventListener('webkitbeginfullscreen', () => {
+        enhanceMode = videoEnhancer?.mode || 'off';
+        if (enhanceMode !== 'off') videoEnhancer.setMode('off', { remember: false });
+    });
+    video.addEventListener('webkitendfullscreen', () => {
+        if (enhanceMode !== 'off' && videoEnhancer) videoEnhancer.setMode(enhanceMode, { remember: false });
+        enhanceMode = 'off';
+    });
+}
+
+function setupWebFullscreenSetting() {
+    if (!usesNativeVideoFullscreen() || typeof art?.setting?.update !== 'function') return;
+    try {
+        art.setting.update({
+            name: 'web-fullscreen',
+            html: '网页全屏',
+            tooltip: '保留弹幕和手势',
+            onClick() {
+                art.setting.show = false;
+                art.fullscreenWeb = !art.fullscreenWeb;
+                updatePlayerControlDensity();
+                return '保留弹幕和手势';
+            }
+        });
+    } catch (error) { console.warn('更新播放设置失败:', error); }
+}
+
 function toggleFullscreenMode() {
     if (!art) return;
+    if (!art.fullscreenWeb && enterNativeVideoFullscreen()) return;
     if (!document.fullscreenEnabled && isMobilePlaybackDevice()) {
         art.fullscreenWeb = !art.fullscreenWeb;
         return;
@@ -595,9 +698,10 @@ function setupPlayerSurfaceToggle() {
             handleTouchTap(event, toggleControlsFromTap);
             return;
         }
+        // 双击的第二下也要拦住，否则播放器自己的单击处理会把视频暂停
+        consumeSurfaceEvent(event);
         if (event.detail > 1) return;
 
-        consumeSurfaceEvent(event);
         clearClickTimer();
         clickTimer = setTimeout(() => {
             clickTimer = null;
@@ -640,20 +744,26 @@ function prepareVideoForNativeCast(video = art?.video, url = getNativeCastVideoU
     if (!video) return '';
 
     try {
-        video.disableRemotePlayback = false;
-        video.removeAttribute('disableRemotePlayback');
         video.setAttribute('x-webkit-airplay', 'allow');
         video.setAttribute('webkit-playsinline', 'true');
         video.setAttribute('playsinline', 'true');
 
         if (url) {
-            let sourceElement = video.querySelector('source');
+            // On Safari 17+ hls.js plays through a <source src="blob:…"> it adds itself (Managed
+            // Media Source). That one must stay first and untouched, or Safari loads the playlist
+            // natively and the ad filter, quality menu and stats stop working. AirPlay gets its own
+            // HLS <source> after it, which is also what lets remote playback stay enabled.
+            let sourceElement = video.querySelector('source[data-native-cast]');
             if (!sourceElement) {
                 sourceElement = document.createElement('source');
+                sourceElement.dataset.nativeCast = 'true';
+                sourceElement.type = 'application/x-mpegURL';
                 video.appendChild(sourceElement);
             }
             sourceElement.src = url;
         }
+        video.disableRemotePlayback = false;
+        video.removeAttribute('disableRemotePlayback');
     } catch (e) {
     }
 
@@ -1084,6 +1194,7 @@ function setupPlayerOverlays() {
     skipMarks = window.PlayerEnhancements.readSkipMarks(currentVideoTitle);
     updateSkipSettings();
     setupVideoEnhance(host);
+    setupDanmaku();
     setupPlayerStats(host, statsWereOpen);
     if (!isMobilePlaybackDevice() && typeof art.setting?.update === 'function') {
         art.setting.update({
@@ -1126,6 +1237,158 @@ function setupVideoEnhance(host) {
     } catch (error) { console.warn('更新播放设置失败:', error); }
 }
 
+// ---- 弹幕：设置里选「关闭 / 稀疏 / 适中 / 密集」（记住选择），按 D 开关；每集播放时按片名和集数查找 ----
+const DANMAKU_MODES = {
+    off: { label: '关闭', perSecond: 0 },
+    light: { label: '稀疏', perSecond: 1 },
+    normal: { label: '适中', perSecond: 2 },
+    dense: { label: '密集', perSecond: 4 }
+};
+
+function readDanmakuMode() {
+    try { const mode = localStorage.getItem('danmakuMode'); return DANMAKU_MODES[mode] ? mode : 'normal'; } catch { return 'normal'; }
+}
+
+function danmakuTooltip() {
+    const mode = readDanmakuMode();
+    return mode === 'off' ? '关闭' : [DANMAKU_MODES[mode].label, danmakuState.status].filter(Boolean).join(' · ');
+}
+
+function renderDanmakuSetting() {
+    if (!danmakuPlugin || typeof art?.setting?.update !== 'function') return;
+    const mode = readDanmakuMode();
+    try {
+        art.setting.update({
+            name: 'danmaku',
+            html: '弹幕',
+            tooltip: danmakuTooltip(),
+            selector: Object.entries(DANMAKU_MODES).map(([value, item]) => ({ html: item.label, value, default: value === mode })),
+            onSelect(item) {
+                setDanmakuMode(item.value);
+                return danmakuTooltip();
+            }
+        });
+    } catch (error) { console.warn('更新播放设置失败:', error); }
+}
+
+function setupDanmaku() {
+    danmakuState.controller?.abort();
+    Object.assign(danmakuState, { key: '', controller: null, result: null, status: '' });
+    danmakuPlugin = null;
+    if (!window.Danmaku || typeof window.artplayerPluginDanmuku !== 'function' || !art?.plugins) return;
+    const mode = readDanmakuMode();
+    if (mode !== 'off') danmakuState.lastOnMode = mode;
+    danmakuPlugin = art.plugins.artplayerPluginDanmuku || art.plugins.add(window.artplayerPluginDanmuku({
+        danmuku: [],
+        emitter: false,
+        speed: 7,
+        opacity: 0.85,
+        // Phones: smaller text in the top half, so the small inline player stays watchable.
+        fontSize: isMobilePlaybackDevice() ? 14 : 24,
+        margin: isMobilePlaybackDevice() ? [6, '50%'] : [10, '30%'],
+        antiOverlap: true,
+        synchronousPlayback: true,
+        visible: mode !== 'off'
+    })).artplayerPluginDanmuku;
+    renderDanmakuSetting();
+}
+
+// The plugin's load(list) appends to its queue and only load() with no argument clears it
+// (back to the empty list it was created with), so a density change clears first and
+// updates while segments arrive add only comments that are not queued yet.
+function clearDanmaku() {
+    danmakuState.queued.clear();
+    return danmakuPlugin?.load();
+}
+
+async function showDanmaku({ reset = false } = {}) {
+    if (!danmakuPlugin) return;
+    const mode = readDanmakuMode();
+    if (mode === 'off' || !danmakuState.result) {
+        danmakuPlugin.hide();
+        return;
+    }
+    if (reset) await clearDanmaku();
+    const fresh = window.Danmaku.thin(danmakuState.result.raw, DANMAKU_MODES[mode].perSecond)
+        .filter(item => {
+            const id = `${item.time}|${item.text}`;
+            if (danmakuState.queued.has(id)) return false;
+            danmakuState.queued.add(id);
+            return true;
+        });
+    if (fresh.length) await danmakuPlugin.load(fresh);
+    danmakuPlugin.show();
+}
+
+function setDanmakuMode(mode) {
+    const next = DANMAKU_MODES[mode] ? mode : 'normal';
+    try { localStorage.setItem('danmakuMode', next); } catch { /* storage blocked */ }
+    if (next !== 'off') danmakuState.lastOnMode = next;
+    showShortcutHint(next === 'off' ? '弹幕已关闭' : `弹幕：${DANMAKU_MODES[next].label}`, 'right');
+    if (next !== 'off' && !danmakuState.key) loadDanmakuForCurrentEpisode();
+    else showDanmaku({ reset: true });
+    renderDanmakuSetting();
+}
+
+function toggleDanmaku() {
+    setDanmakuMode(readDanmakuMode() === 'off' ? danmakuState.lastOnMode : 'off');
+}
+
+// Called when an episode's metadata is ready; a newer episode cancels a pending lookup.
+function loadDanmakuForCurrentEpisode() {
+    if (!danmakuPlugin) return;
+    if (readDanmakuMode() === 'off') {
+        // Forget the previous episode, so turning comments on later loads this one.
+        danmakuState.controller?.abort();
+        Object.assign(danmakuState, { key: '', controller: null, result: null, status: '' });
+        clearDanmaku();
+        return;
+    }
+    const params = new URLSearchParams(location.search);
+    const year = params.get('year') || '';
+    const key = [currentVideoTitle, year, currentEpisodeIndex].join('|');
+    if (key === danmakuState.key) return;
+    danmakuState.controller?.abort();
+    const controller = new AbortController();
+    Object.assign(danmakuState, { key, controller, result: null, status: '查找中…' });
+    clearDanmaku();
+    renderDanmakuSetting();
+    window.Danmaku.load({
+        title: currentVideoTitle,
+        year,
+        kind: params.get('kind') || (currentEpisodes.length > 1 ? 'tv' : ''),
+        index: currentEpisodeIndex,
+        duration: Number(art?.video?.duration) || 0,
+        from: Number(art?.video?.currentTime) || 0,
+        signal: controller.signal,
+        // Show what has arrived (around the playback position first) at most every 2 seconds.
+        onPartial: partial => {
+            if (controller.signal.aborted || danmakuState.key !== key) return;
+            const now = performance.now();
+            if (danmakuState.result && now - (danmakuState.shownAt || 0) < 2000) return;
+            danmakuState.shownAt = now;
+            danmakuState.result = partial;
+            danmakuState.status = `${partial.siteName} 加载中…`;
+            showDanmaku();
+        }
+    }).catch(() => null).then(result => {
+        if (controller.signal.aborted || danmakuState.key !== key) return;
+        danmakuState.result = result;
+        danmakuState.status = result ? `${result.siteName} ${result.raw.length.toLocaleString()} 条` : '这一集没有找到弹幕';
+        showDanmaku();
+        renderDanmakuSetting();
+    });
+}
+
+function danmakuSummary() {
+    if (!danmakuPlugin) return '';
+    if (readDanmakuMode() === 'off') return '关闭';
+    const { result } = danmakuState;
+    if (!result) return danmakuState.status || '';
+    const shown = window.Danmaku.thin(result.raw, DANMAKU_MODES[readDanmakuMode()].perSecond).length;
+    return `${result.siteName} · 显示 ${shown.toLocaleString()} / 共 ${result.raw.length.toLocaleString()} 条（${result.matched}）`;
+}
+
 // 「统计信息」：替换 ArtPlayer 自带的英文信息面板（它的关闭按钮会被画面点击抢走），右键菜单和播放设置里都能打开
 function setupPlayerStats(host, reopen) {
     if (!window.PlayerStats) return;
@@ -1137,7 +1400,8 @@ function setupPlayerStats(host, reopen) {
             title: currentVideoTitle,
             episode: currentEpisodeCounterText(),
             source: API_SITES?.[new URLSearchParams(location.search).get('source') || '']?.name || '',
-            enhance: videoEnhancer?.describe() || ''
+            enhance: videoEnhancer?.describe() || '',
+            danmaku: danmakuSummary()
         })
     });
     const toggle = () => playerStats?.toggle();
@@ -1463,7 +1727,8 @@ function setupProgressPreview() {
 
     const progressBar = document.querySelector('#player .art-control-progress') ||
         document.querySelector('#player .art-progress');
-    const playerEl = document.getElementById('player');
+    // 挂在播放器本体上：全屏的是它，挂在外层容器上全屏时会看不见、却仍在后台下载预览分片
+    const playerEl = art.template?.$player || document.getElementById('player');
     if (!progressBar || !playerEl) return;
 
     progressPreviewEl = document.createElement('div');
@@ -1712,11 +1977,6 @@ async function initializePageContent() {
     // 更新排序按钮状态
     updateOrderButton();
 
-    // 添加对进度条的监听，确保点击准确跳转
-    setTimeout(() => {
-        setupProgressBarPreciseClicks();
-    }, 1000);
-
     // 添加键盘快捷键事件监听
     document.addEventListener('keydown', handleKeyboardShortcuts);
     document.addEventListener('keyup', handleKeyboardShortcutRelease);
@@ -1853,6 +2113,9 @@ function handleKeyboardShortcuts(e) {
             break;
         case 'help':
             shortcutHelp?.toggle();
+            break;
+        case 'danmaku':
+            toggleDanmaku();
             break;
         case 'escape':
             if (shortcutHelp?.isOpen) shortcutHelp.close();
@@ -2156,8 +2419,12 @@ function initPlayer(videoUrl) {
         { title: () => currentVideoTitle, isFullscreen: isPlayerFullscreenActive,
           isTouchDevice: isMobilePlaybackDevice,
           hasEpisodes: () => currentEpisodes.length > 1,
-          onEpisodes: toggleEpisodeDrawer }
+          onEpisodes: toggleEpisodeDrawer,
+          enterNativeFullscreen: enterNativeVideoFullscreen }
     );
+    setupNativeFullscreenHandoff(art.video);
+    setupAppScreenWake(art.video);
+    setupWebFullscreenSetting();
     setupPlayerOverlays();
     // 记住用户选择的倍速；新视频加载时浏览器会把倍速重置为 1（此时 readyState 为 0），不能记下来
     art.video.addEventListener('ratechange', () => {
@@ -2245,6 +2512,7 @@ function initPlayer(videoUrl) {
 
     art.on('video:loadedmetadata', function() {
         skipState.ready = true;
+        loadDanmakuForCurrentEpisode();
         applyPreferredPlaybackRate();
         if (isPlayerFullscreenActive()) maybeLockLandscapeOrientation();
         document.getElementById('player-loading').style.display = 'none';
@@ -2255,7 +2523,6 @@ function initPlayer(videoUrl) {
         setupPlayerTopActions();
         setupPlayerSurfaceToggle();
         setupPlayerControlDensity();
-        setupProgressBarPreciseClicks();
         setupProgressPreview();
         tryStartPlayback();
 
@@ -2403,8 +2670,14 @@ function retryInterruptedPlayback() {
     if (currentHls) {
         playbackRecovery?.reset();
         currentHls.startLoad();
-    } else if (currentVideoUrl && typeof art.switchQuality === 'function') {
-        art.switchQuality(currentVideoUrl);
+    } else if (art.video && currentVideoUrl) {
+        // MP4 / 原生播放：同一地址再 switchQuality 会被播放器忽略，直接重新加载并回到原位置
+        const video = art.video;
+        const position = video.currentTime;
+        video.addEventListener('loadedmetadata', () => {
+            if (position > 0) video.currentTime = position;
+        }, { once: true });
+        video.load();
     }
     if (art.video?.paused) tryStartPlayback();
 }
@@ -2634,6 +2907,8 @@ function playEpisode(index) {
         art.switch = url;
         tryStartPlayback();
     }
+    // 正在投屏时，电视跟着播放新的一集
+    if (window.LibreTVCast?.active) window.LibreTVCast.follow(appCastSource());
 
     // 更新UI
     updateEpisodeInfo();
@@ -2641,7 +2916,6 @@ function playEpisode(index) {
     renderEpisodes();
 
     // 重置用户点击位置记录
-    userClickedPosition = null;
 
     // 三秒后保存到历史记录
     setTimeout(() => saveToHistory(), 3000);
@@ -2697,75 +2971,6 @@ function updateOrderButton() {
     if (orderText && orderIcon) {
         orderText.textContent = episodesReversed ? '正序排列' : '倒序排列';
         orderIcon.style.transform = episodesReversed ? 'rotate(180deg)' : '';
-    }
-}
-
-// 设置 ArtPlayer 进度条准确点击处理
-function setupProgressBarPreciseClicks() {
-    const progressBar = document.querySelector('#player .art-control-progress') ||
-        document.querySelector('#player .art-progress');
-    if (!progressBar || !art || !art.video) return;
-
-    // 移除可能存在的旧事件监听器
-    progressBar.removeEventListener('mousedown', handleProgressBarClick);
-
-    // 添加新的事件监听器
-    progressBar.addEventListener('mousedown', handleProgressBarClick);
-
-    // 在移动端也添加触摸事件支持
-    progressBar.removeEventListener('touchstart', handleProgressBarTouch);
-    progressBar.addEventListener('touchstart', handleProgressBarTouch);
-
-    // 处理进度条点击
-    function handleProgressBarClick(e) {
-        if (!art || !art.video) return;
-
-        // 计算点击位置相对于进度条的比例
-        const rect = e.currentTarget.getBoundingClientRect();
-        const percentage = (e.clientX - rect.left) / rect.width;
-
-        // 计算点击位置对应的视频时间
-        const duration = art.video.duration;
-        let clickTime = percentage * duration;
-
-        // 处理视频接近结尾的情况
-        if (duration - clickTime < 1) {
-            // 如果点击位置非常接近结尾，稍微往前移一点
-            clickTime = Math.min(clickTime, duration - 1.5);
-
-        }
-
-        // 记录用户点击的位置
-        userClickedPosition = clickTime;
-
-        // 阻止事件冒泡后直接使用 ArtPlayer seek，避免接近片尾时误跳到结束状态
-        e.stopPropagation();
-
-        // 直接设置视频时间
-        art.seek(clickTime);
-    }
-
-    // 处理移动端触摸事件
-    function handleProgressBarTouch(e) {
-        if (!art || !art.video || !e.touches[0]) return;
-
-        const touch = e.touches[0];
-        const rect = e.currentTarget.getBoundingClientRect();
-        const percentage = (touch.clientX - rect.left) / rect.width;
-
-        const duration = art.video.duration;
-        let clickTime = percentage * duration;
-
-        // 处理视频接近结尾的情况
-        if (duration - clickTime < 1) {
-            clickTime = Math.min(clickTime, duration - 1.5);
-        }
-
-        // 记录用户点击的位置
-        userClickedPosition = clickTime;
-
-        e.stopPropagation();
-        art.seek(clickTime);
     }
 }
 
@@ -2886,8 +3091,8 @@ function showPositionRestoreHint(position) {
     `;
 
     // 添加到播放器容器
-    const playerContainer = document.querySelector('.player-container'); // Ensure this selector is correct
-    if (playerContainer) { // Check if playerContainer exists
+    const playerContainer = art?.template?.$player || document.getElementById('player');
+    if (playerContainer) {
         playerContainer.appendChild(hint);
     } else {
         return; // Exit if container not found
@@ -3179,7 +3384,7 @@ function renderResourceInfoBar() {
         resourceName = API_SITES[currentSource].name;
     }
     if (resourceName === currentSource) {
-        const customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]');
+        const customAPIs = readStoredList('customAPIs', []);
         const customIndex = parseInt(currentSource.replace('custom_', ''), 10);
         if (customAPIs[customIndex]) {
             resourceName = customAPIs[customIndex].name || '自定义资源';
@@ -3193,7 +3398,8 @@ function renderResourceInfoBar() {
       </div>
       <div class="quick-player-actions">
         <button type="button" class="resource-switch-btn" id="switchResourceBtn" onclick="showSwitchResourceModal()">换源</button>
-        ${isMobilePlaybackDevice() || !window.PlayerDownload ? '' : '<button type="button" id="downloadVideoButton" aria-haspopup="menu" aria-expanded="false" onclick="toggleDownloadMenu(this)">下载</button>'}
+        ${window.LibreTVCast?.isApp && !window.TVMode?.active ? '<button type="button" id="castButton" onclick="openAppCast()">投屏</button>' : ''}
+        ${isMobilePlaybackDevice() || window.TVMode?.active || !window.PlayerDownload ? '' : '<button type="button" id="downloadVideoButton" aria-haspopup="menu" aria-expanded="false" onclick="toggleDownloadMenu(this)">下载</button>'}
         ${currentEpisodes.length > 1 ? '<button type="button" id="quickEpisodesButton" aria-expanded="false" onclick="toggleQuickEpisodes()">选集</button>' : ''}
         <button type="button" id="quickSettingsButton" aria-expanded="false" onclick="toggleQuickSettings()">更多</button>
       </div>
@@ -3201,6 +3407,25 @@ function renderResourceInfoBar() {
     document.querySelectorAll('.quick-episode-section').forEach(section => { section.hidden = true; });
     document.getElementById('quickMoreActions')?.replaceChildren();
     renderQuickMoreActions();
+}
+
+// ---- 投屏（仅安卓 App）：DLNA 投到电视，电视直接拉流播放 ----
+function appCastSource() {
+    return { url: currentVideoUrl, title: downloadFileName(), position: art?.video?.currentTime || 0 };
+}
+
+function openAppCast() {
+    window.LibreTVCast?.open(appCastSource(), () => {
+        // 电视开始播放后，手机上的播放暂停，避免两边同时出声
+        if (art?.video && !art.video.paused) art.pause();
+    });
+}
+
+// App 里播放时保持屏幕常亮，暂停或播完后恢复
+function setupAppScreenWake(video) {
+    if (!window.LibreTVCast?.isApp || !video) return;
+    video.addEventListener('play', () => window.LibreTVCast.keepScreenOn(true));
+    ['pause', 'ended', 'emptied'].forEach(name => video.addEventListener(name, () => window.LibreTVCast.keepScreenOn(false)));
 }
 
 // ---- 下载（仅电脑版）：下载本集为 MP4，或复制视频地址交给下载工具 ----

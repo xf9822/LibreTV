@@ -125,15 +125,6 @@ function hideLoading() {
     loading.style.display = 'none';
 }
 
-function updateSiteStatus(isAvailable) {
-    const statusEl = document.getElementById('siteStatus');
-    if (isAvailable) {
-        statusEl.innerHTML = '<span class="text-green-500">●</span> 可用';
-    } else {
-        statusEl.innerHTML = '<span class="text-red-500">●</span> 不可用';
-    }
-}
-
 function closeModal() {
     window.cancelMovieSourceSpeedChecks?.();
     window.cancelResourceSwitchSpeedChecks?.();
@@ -513,8 +504,9 @@ function loadViewingHistory() {
             item.sourceName.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') :
             '未知来源';
 
-        const episodeText = item.episodeIndex !== undefined ?
-            `第${item.episodeIndex + 1}集` : '';
+        const episodeNumber = Number(item.episodeIndex);
+        const episodeText = Number.isInteger(episodeNumber) && episodeNumber >= 0 ?
+            `第${episodeNumber + 1}集` : '';
 
         // 格式化剧集信息
         let episodeInfoHtml = '';

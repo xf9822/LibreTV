@@ -8,4 +8,4 @@ nodemon.json
 vercel.json
 Dockerfile*
 docker-compose*.yml
-.docker/
+.docker/android/

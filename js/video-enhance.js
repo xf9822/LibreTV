@@ -298,6 +298,7 @@ void main() {
         let watchdog = 0;
         let quality = null;
         let resizeObserver = null;
+        let destroyed = false;
 
         function setup() {
             if (gl) return true;
@@ -317,7 +318,14 @@ void main() {
             statsTexture = texture(gl, gl.NEAREST);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, STATS_SIZE.width, STATS_SIZE.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
             framebuffer = gl.createFramebuffer();
-            canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); stop(); gl = null; }, { once: true });
+            // A lost context (GPU reset, Android reclaiming it in the background) would leave the
+            // video hidden behind a dead canvas: fall back to the plain picture.
+            canvas.addEventListener('webglcontextlost', event => {
+                event.preventDefault();
+                stop();
+                gl = null;
+                onContextLost();
+            }, { once: true });
             return true;
         }
 
@@ -471,6 +479,12 @@ void main() {
             resizeObserver.observe(host);
         }
 
+        function onContextLost() {
+            if (destroyed || mode === 'off') return;
+            setMode('off', { remember: false });
+            notify('显卡暂时不可用，画质增强已关闭，可在设置里重新打开');
+        }
+
         function setMode(next, { remember = true } = {}) {
             const wanted = MODES[next] ? next : 'off';
             if (remember) writeMode(wanted);
@@ -511,6 +525,7 @@ void main() {
                 return canvas.toDataURL('image/png');
             },
             destroy() {
+                destroyed = true;
                 stop();
                 ['loadeddata', 'seeked', 'resize', 'pause'].forEach(name => video.removeEventListener(name, redraw));
                 video.removeEventListener('play', onPlay);
