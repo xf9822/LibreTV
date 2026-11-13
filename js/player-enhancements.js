@@ -426,6 +426,14 @@
         };
     }
 
+    // A screen point in the player's own coordinates. In the rotated web fullscreen on iPhone the
+    // player is turned 90° clockwise: its x axis runs down the screen and its y axis from right to left.
+    function playerPoint(clientX, clientY, rect, rotated) {
+        if (!rect) return { x: 0, y: 0, width: 0, height: 0 };
+        if (rotated) return { x: clientY - rect.top, y: rect.right - clientX, width: rect.height, height: rect.width };
+        return { x: clientX - rect.left, y: clientY - rect.top, width: rect.width, height: rect.height };
+    }
+
     // Touch double-tap zones: left third rewinds, right third forwards, middle toggles play.
     function doubleTapZone(clientX, rect) {
         if (!rect || !(rect.width > 0)) return 'center';
@@ -532,6 +540,7 @@
         stepRate,
         createShortcutHelp,
         doubleTapZone,
+        playerPoint,
         swipeSeekTarget,
         createPlaybackRecovery,
         createPlaybackNotice

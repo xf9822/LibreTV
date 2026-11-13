@@ -1292,15 +1292,17 @@ test('release metadata is bumped for this update', async () => {
 
   const changelog = await readProjectFile('CHANGELOG.md');
 
-  assert.equal(packageJson.version, '1.2.58');
-  assert.equal(lockJson.version, '1.2.58');
-  assert.equal(lockJson.packages[''].version, '1.2.58');
-  assert.match(config, /version:\s*'1\.2\.58'/);
-  assert.match(serviceWorker, /const APP_VERSION = '202610310906'/);
+  assert.equal(packageJson.version, '1.2.60');
+  assert.equal(lockJson.version, '1.2.60');
+  assert.equal(lockJson.packages[''].version, '1.2.60');
+  assert.match(config, /version:\s*'1\.2\.60'/);
+  assert.match(serviceWorker, /const APP_VERSION = '202611120741'/);
   assert.match(serviceWorker, /'\/js\/player-recommendations\.js'/);
   assert.match(serviceWorker, /'\/js\/mobile-fullscreen\.js'/);
   assert.match(serviceWorker, /'\/css\/theme\.css'/);
   assert.match(serviceWorker, /'\/js\/source-speed\.js'/);
+  assert.match(changelog, /## 1\.2\.60 - 2026-11-12[\s\S]*?Danmaku settings panel/);
+  assert.match(changelog, /## 1\.2\.59 - 2026-11-12[\s\S]*?variety shows/);
   assert.match(changelog, /## 1\.2\.58 - 2026-10-31[\s\S]*?Android TV app/);
   assert.match(changelog, /## 1\.2\.57 - 2026-10-31[\s\S]*?一键优选/);
   assert.match(changelog, /## 1\.2\.56 - 2026-10-31[\s\S]*?edge to edge/);

@@ -37,6 +37,7 @@
         const p = player();
         if (p?.setting?.show) return document.querySelector('.art-settings');
         const layers = [
+            '.danmaku-panel:not([hidden])',
             '.player-episode-drawer:not([hidden])',
             '.cast-panel-backdrop:not([hidden])',
             '#passwordModal:not(.hidden)',
@@ -183,6 +184,8 @@
         const direction = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[key];
         const target = document.activeElement;
         if (direction) {
+            // 竖条（弹幕设置）自己用上下键调大小，左右键照常换焦点
+            if ((direction === 'up' || direction === 'down') && target?.closest?.('[data-tv-keys="vertical"]')) return;
             // 输入框里左右键用来移动光标，到头了才离开
             if (isTyping(target) && (direction === 'left' || direction === 'right')) {
                 const atStart = target.selectionStart === 0 && target.selectionEnd === 0;
@@ -216,6 +219,8 @@
     function back() {
         const p = player();
         if (p?.setting?.show) { p.setting.show = false; return true; }
+        const danmakuPanel = document.querySelector('.danmaku-panel:not([hidden])');
+        if (danmakuPanel) { danmakuPanel.hidden = true; return true; }
         if (typeof episodeDrawer !== 'undefined' && episodeDrawer?.isOpen) { episodeDrawer.close(); return true; }
         const cast = document.querySelector('.cast-panel-backdrop:not([hidden])');
         if (cast) { cast.hidden = true; return true; }

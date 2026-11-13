@@ -1,4 +1,4 @@
-const APP_VERSION = '202610310906';
+const APP_VERSION = '202611120741';
 const APP_SHELL_CACHE = `libretv-shell-${APP_VERSION}`;
 const OFFLINE_URL = '/offline.html';
 
@@ -50,6 +50,7 @@ const APP_SHELL_ASSETS = [
   '/js/player-download.js',
   '/js/video-enhance.js',
   '/js/danmaku.js',
+  '/js/danmaku-panel.js',
   '/js/player.js',
   '/js/cast-receiver.js',
   '/js/diagnostics.js',

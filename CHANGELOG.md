@@ -2,6 +2,49 @@
 
 All notable changes to this maintained LibreTV fork are documented here.
 
+## 1.2.60 - 2026-11-12
+
+### Added
+
+- Danmaku settings panel (`js/danmaku-panel.js`), modelled on the "弹幕工具箱" of video sites. It opens from the 弹幕 item in the playback settings and sits inside the player, so it also works in fullscreen.
+  - Four vertical bars, which you can drag, tap, or adjust with the arrow keys:
+    - 行数: 1–4 lines, ¼ screen, half screen, ¾ screen or the full screen.
+    - 不透明度: 20–100 %.
+    - 速度: five steps.
+    - 字号: five steps.
+  - The other settings in the panel:
+    - Density: 稀疏 / 适中 / 密集 / 完整. 完整 is new and shows up to 12 comments a second.
+    - A show / hide switch.
+    - 彩色弹幕: on or off.
+    - 恢复默认设置.
+  - The choices are remembered on the device. The panel also shows where the comments came from and how many are shown.
+  - On a TV, the up / down keys adjust a bar and left / right move between bars. The back key closes the panel.
+
+### Fixed
+
+- Danmaku drifted out of sync on some resource sites.
+  - Some resource sites splice ~20 s ad clips into the video. Their file names look like the episode's own files, so the ad filter keeps them, and the comments fell behind by the length of each ad.
+  - The player now compares the playlist's sections with the platform's own runtime (Mango TV gives it) and finds the short sections that add up to the extra length. Comments then skip those sections.
+  - Example: on one site 第5期上 is 55 s longer than Mango's 68:16, from three ads of 19.6 + 17.4 + 19.6 s.
+  - If no such sections add up to within 3 s of the difference, nothing is guessed and the comments keep the platform's timing. The panel says how many seconds of ads were skipped.
+- iPhone fullscreen now shows danmaku.
+  - The iPhone's system fullscreen player cannot show anything from the page. So while danmaku is on, the fullscreen button uses the page's own fullscreen instead.
+  - When the phone is held upright, the player is turned 90° so the video still fills the screen sideways. The progress bar, swipe gestures, double tap and the danmaku panel all follow the turned direction.
+  - With danmaku off (or none found for the episode), the button still uses the system fullscreen. The playback settings offer both (网页全屏 / 系统全屏).
+  - From the home-screen web app, there is no browser bar at all.
+
+## 1.2.59 - 2026-11-12
+
+### Fixed
+
+- Danmaku for variety shows, Mango TV first. 后会友期 now loads its Mango TV comments (23,659 for 第4期上).
+  - For variety shows, 360 lists each episode separately on every platform (第3期上, 加更版, 抢鲜版…) instead of giving one link, and the code only understood the single-link form used by films and series. So variety comments were never found.
+  - Resource sites name the same episode in many ways, such as 第20261029期上, 20261029第3期上, 20261029上, 第3期上 and 20261022-01. The player now passes the episode name, and `js/danmaku.js` reads the air date, issue number, 上 / 下 and edition (正片 / 加更 / 抢鲜 / 沉浸版 / 花絮) from it, then picks the best-matching platform episode.
+  - Two episodes on the same day are told apart by order (-01 / -02, or 上 → first, 下 → last) or by the closest running time. A name with nothing to go on (just 抢鲜版) is left unmatched rather than guessed.
+  - Mango TV: the full episode list (`pcweb.api.mgtv.com/episode/list`) and each month's air dates (`variety/showlist`) are fetched through the proxy.
+  - 沉浸版 episodes use the separate 沉浸版 programme.
+  - Checked against the real 后会友期 listings of five resource sites: all episode names that carry a date or number map to the right Mango episode.
+
 ## 1.2.58 - 2026-10-31
 
 ### Added

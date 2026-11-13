@@ -70,7 +70,7 @@ test('the player opens its own stats panel and keeps its clicks away from play/p
   assert.match(selector, /'\.player-stats-panel'/);
   assert.match(player, /tracker\?\.fragment\(window\.PlayerStats\.fragmentStats\(data\)\)/);
   assert.match(player, /hls\.on\(Hls\.Events\.BUFFER_CODECS/);
-  assert.match(await read('js/mobile-fullscreen.js'), /\.player-shortcut-help, \.player-stats-panel'\)/);
+  assert.match(await read('js/mobile-fullscreen.js'), /\.player-shortcut-help, \.player-stats-panel, \.danmaku-panel'\)/);
   const html = await read('player.html');
   assert.ok(html.indexOf('js/player-stats.js') < html.indexOf('js/player.js"'));
   assert.match(await read('service-worker.js'), /'\/js\/player-stats\.js'/);

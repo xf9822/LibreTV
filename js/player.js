@@ -165,7 +165,9 @@ let playerStats = null; // 「统计信息」面板（网络、缓冲、分片�
 let statsTracker = null; // 当前 HLS 实例的下载统计
 let videoEnhancer = null; // 画质增强（WebGL FSR 放大 + 锐化）
 let danmakuPlugin = null; // 弹幕渲染（artplayer-plugin-danmuku）
-const danmakuState = { key: '', controller: null, result: null, status: '', lastOnMode: 'normal', queued: new Set() };
+let danmakuPanel = null; // 弹幕设置面板（播放器里）
+// breaks：认出来的插播广告；timing：上次显示用的时间换算，变了就整体重排
+const danmakuState = { key: '', controller: null, result: null, status: '', lastOnMode: 'normal', queued: new Set(), breaks: [], timing: '' };
 // ready：新一集的元数据加载完成前，video.currentTime 仍是上一集的进度，不能据此跳过或预加载
 let skipState = { introDone: false, outroDone: false, preloaded: false, ready: false };
 let nextEpisodePreloadController = null;
@@ -193,6 +195,7 @@ const PLAYER_SURFACE_INTERACTIVE_SELECTOR = [
     '[class*="art-contextmenu"]',
     '.art-info',
     '.player-stats-panel',
+    '.danmaku-panel',
     '.progress-preview',
     '.player-top-actions',
     '[data-video-interactive="true"]',
@@ -542,14 +545,19 @@ function unlockLandscapeOrientation() {
 }
 
 // iPhone 的 Safari 不能把网页元素全屏，只能「网页全屏」（地址栏和工具栏还在）；视频本身可以进入
-// 系统全屏，这才是真正的全屏。系统播放器里看不到弹幕和手势层，所以设置里另留「网页全屏」可选。
+// 系统全屏，这才是真正的全屏，但系统播放器里看不到弹幕和手势层。
+// 所以：开着弹幕时全屏按钮用网页全屏（竖着拿手机时把播放器横过来），关了弹幕用系统全屏；设置里两种都能手动选。
 function usesNativeVideoFullscreen() {
     return !document.fullscreenEnabled && !document.webkitFullscreenEnabled &&
         typeof art?.video?.webkitEnterFullscreen === 'function';
 }
 
-function enterNativeVideoFullscreen() {
-    if (!usesNativeVideoFullscreen()) return false;
+function prefersWebFullscreen() {
+    return Boolean(danmakuPlugin) && readDanmakuMode() !== 'off' && danmakuState.status !== DANMAKU_NOT_FOUND;
+}
+
+function enterNativeVideoFullscreen({ force = false } = {}) {
+    if (!usesNativeVideoFullscreen() || (!force && prefersWebFullscreen())) return false;
     try {
         if (art.fullscreenWeb) art.fullscreenWeb = false;
         art.video.webkitEnterFullscreen();
@@ -578,15 +586,69 @@ function setupWebFullscreenSetting() {
         art.setting.update({
             name: 'web-fullscreen',
             html: '网页全屏',
-            tooltip: '保留弹幕和手势',
+            tooltip: '有弹幕和手势',
             onClick() {
                 art.setting.show = false;
                 art.fullscreenWeb = !art.fullscreenWeb;
                 updatePlayerControlDensity();
-                return '保留弹幕和手势';
+                return '有弹幕和手势';
+            }
+        });
+        art.setting.update({
+            name: 'system-fullscreen',
+            html: '系统全屏',
+            tooltip: '看不到弹幕',
+            onClick() {
+                art.setting.show = false;
+                enterNativeVideoFullscreen({ force: true });
+                return '看不到弹幕';
             }
         });
     } catch (error) { console.warn('更新播放设置失败:', error); }
+}
+
+// iPhone 网页全屏：手机竖着拿、视频是横的，就把播放器转 90° 铺满屏幕，像系统全屏一样横着看。
+// 转过来以后播放器自带的进度条拖动会按 art.isRotate 换方向；手机转成横屏时不用再转，恢复原样。
+function setupWebFullscreenRotation() {
+    if (!usesNativeVideoFullscreen() || !art?.template?.$player) return;
+    const player = art.template.$player;
+    const ROTATED = 'lt-rotated';
+    const apply = () => {
+        if (!art || art.template?.$player !== player) return;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const video = art.video;
+        const landscapeVideo = !(video?.videoWidth && video?.videoHeight) || video.videoWidth >= video.videoHeight;
+        const rotate = art.fullscreenWeb && landscapeVideo && width < height;
+        const wasRotated = player.classList.contains(ROTATED);
+        // 页面样式用 !important 把播放器锁成 100% 宽高，这里也要用 important 才盖得过
+        const STYLE = {
+            width: `${height}px`, height: `${width}px`, 'max-height': 'none',
+            'transform-origin': '0 0', transform: `rotate(90deg) translate(0, -${width}px)`
+        };
+        if (rotate) {
+            for (const [name, value] of Object.entries(STYLE)) player.style.setProperty(name, value, 'important');
+            player.classList.add(ROTATED);
+            art.isRotate = true;
+        } else if (wasRotated) {
+            for (const name of Object.keys(STYLE)) player.style.removeProperty(name);
+            player.classList.remove(ROTATED);
+            art.isRotate = false;
+        } else {
+            return;
+        }
+        art.emit('resize');
+    };
+    let timer = null;
+    const later = () => { clearTimeout(timer); timer = setTimeout(apply, 120); };
+    art.on('fullscreenWeb', () => setTimeout(apply, 0));
+    art.on('video:loadedmetadata', later);
+    window.addEventListener('resize', later);
+    window.addEventListener('orientationchange', later);
+    art.on('destroy', () => {
+        window.removeEventListener('resize', later);
+        window.removeEventListener('orientationchange', later);
+    });
 }
 
 function toggleFullscreenMode() {
@@ -661,7 +723,8 @@ function setupPlayerSurfaceToggle() {
 
     // 双击：左侧三分之一快退 10 秒，右侧三分之一快进 10 秒，中间播放/暂停
     const handleDoubleTap = (event) => {
-        const zone = window.PlayerEnhancements.doubleTapZone(event.clientX, playerEl.getBoundingClientRect());
+        const point = window.PlayerEnhancements.playerPoint(event.clientX, event.clientY, playerEl.getBoundingClientRect(), art?.isRotate);
+        const zone = window.PlayerEnhancements.doubleTapZone(point.x, { left: 0, width: point.width });
         if (zone === 'center') {
             togglePlaybackFromSurface();
             return;
@@ -1237,12 +1300,15 @@ function setupVideoEnhance(host) {
     } catch (error) { console.warn('更新播放设置失败:', error); }
 }
 
-// ---- 弹幕：设置里选「关闭 / 稀疏 / 适中 / 密集」（记住选择），按 D 开关；每集播放时按片名和集数查找 ----
+// ---- 弹幕：设置里的「弹幕」打开弹幕设置面板（密度、行数、不透明度、速度、字号、彩色），按 D 开关；
+// 每集播放时按片名和集数查找 ----
+const DANMAKU_NOT_FOUND = '这一集没有找到弹幕';
 const DANMAKU_MODES = {
     off: { label: '关闭', perSecond: 0 },
     light: { label: '稀疏', perSecond: 1 },
     normal: { label: '适中', perSecond: 2 },
-    dense: { label: '密集', perSecond: 4 }
+    dense: { label: '密集', perSecond: 4 },
+    full: { label: '完整', perSecond: 12 }
 };
 
 function readDanmakuMode() {
@@ -1255,42 +1321,105 @@ function danmakuTooltip() {
 }
 
 function renderDanmakuSetting() {
+    danmakuPanel?.render();
     if (!danmakuPlugin || typeof art?.setting?.update !== 'function') return;
-    const mode = readDanmakuMode();
     try {
         art.setting.update({
             name: 'danmaku',
             html: '弹幕',
             tooltip: danmakuTooltip(),
-            selector: Object.entries(DANMAKU_MODES).map(([value, item]) => ({ html: item.label, value, default: value === mode })),
-            onSelect(item) {
-                setDanmakuMode(item.value);
+            onClick() {
+                art.setting.show = false;
+                openDanmakuPanel();
                 return danmakuTooltip();
             }
         });
     } catch (error) { console.warn('更新播放设置失败:', error); }
 }
 
+// 行数、字号等按播放器当前大小换算：全屏、横过来、窗口变化时重新算
+function danmakuStyleOptions() {
+    const style = window.DanmakuPanel?.readStyle?.();
+    if (!style) return { speed: 7, opacity: 0.85, fontSize: isMobilePlaybackDevice() ? 14 : 24, margin: isMobilePlaybackDevice() ? [6, '50%'] : [10, '30%'] };
+    return window.DanmakuPanel.pluginOptions(style, {
+        height: art?.template?.$player?.clientHeight || 0,
+        mobile: isMobilePlaybackDevice(),
+        fullscreen: isPlayerFullscreenActive()
+    });
+}
+
+function applyDanmakuStyle() {
+    if (!danmakuPlugin) return;
+    const visible = readDanmakuMode() !== 'off' && Boolean(danmakuState.result);
+    try { danmakuPlugin.config({ ...danmakuStyleOptions(), visible }); } catch (error) { console.warn('弹幕样式更新失败:', error); }
+}
+
+function openDanmakuPanel() {
+    if (!danmakuPanel) return;
+    if (readDanmakuMode() !== 'off' && !danmakuState.key) loadDanmakuForCurrentEpisode();
+    danmakuPanel.open();
+}
+
 function setupDanmaku() {
     danmakuState.controller?.abort();
-    Object.assign(danmakuState, { key: '', controller: null, result: null, status: '' });
+    Object.assign(danmakuState, { key: '', controller: null, result: null, status: '', breaks: [], timing: '' });
     danmakuPlugin = null;
+    danmakuPanel?.destroy();
+    danmakuPanel = null;
     if (!window.Danmaku || typeof window.artplayerPluginDanmuku !== 'function' || !art?.plugins) return;
     const mode = readDanmakuMode();
     if (mode !== 'off') danmakuState.lastOnMode = mode;
     danmakuPlugin = art.plugins.artplayerPluginDanmuku || art.plugins.add(window.artplayerPluginDanmuku({
         danmuku: [],
         emitter: false,
-        speed: 7,
-        opacity: 0.85,
-        // Phones: smaller text in the top half, so the small inline player stays watchable.
-        fontSize: isMobilePlaybackDevice() ? 14 : 24,
-        margin: isMobilePlaybackDevice() ? [6, '50%'] : [10, '30%'],
+        ...danmakuStyleOptions(),
         antiOverlap: true,
         synchronousPlayback: true,
         visible: mode !== 'off'
     })).artplayerPluginDanmuku;
+    if (window.DanmakuPanel && art.template?.$player) {
+        danmakuPanel = window.DanmakuPanel.create({
+            host: art.template.$player,
+            isRotated: () => Boolean(art?.isRotate),
+            getState: () => ({
+                visible: readDanmakuMode() !== 'off',
+                density: readDanmakuMode() === 'off' ? danmakuState.lastOnMode : readDanmakuMode(),
+                autoFix: danmakuState.breaks.reduce((sum, ad) => sum + ad.duration, 0),
+                summary: danmakuSummary()
+            }),
+            onStyle: () => { applyDanmakuStyle(); showDanmaku({ reset: true }); },
+            onDensity: value => setDanmakuMode(value),
+            onVisible: on => setDanmakuMode(on ? danmakuState.lastOnMode : 'off')
+        });
+    }
+    let resizeTimer = null;
+    const restyle = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(applyDanmakuStyle, 150); };
+    art.on('resize', restyle);
+    art.on('fullscreen', restyle);
+    art.on('fullscreenWeb', restyle);
     renderDanmakuSetting();
+}
+
+// 资源站在视频里插播的广告：拿播放列表里各段的长度和平台正片时长比，认出来后弹幕跳过这些段
+function hlsDiscontinuityBlocks() {
+    if (!currentHls || currentHls.media !== art?.video) return [];
+    const levels = currentHls.levels || [];
+    const details = levels[currentHls.currentLevel]?.details || levels.find(level => level?.details)?.details;
+    const blocks = new Map();
+    for (const fragment of details?.fragments || []) {
+        const block = blocks.get(fragment.cc);
+        if (block) block.duration += fragment.duration;
+        else blocks.set(fragment.cc, { start: fragment.start, duration: fragment.duration });
+    }
+    return [...blocks.values()];
+}
+
+function danmakuTiming() {
+    const seconds = danmakuState.result?.seconds || 0;
+    const breaks = seconds ? window.Danmaku.logic.adBreaks(hlsDiscontinuityBlocks(), seconds) : [];
+    danmakuState.breaks = breaks;
+    const colorful = window.DanmakuPanel?.readStyle?.().colorful !== false;
+    return { breaks, colorful, signature: JSON.stringify([breaks, colorful]) };
 }
 
 // The plugin's load(list) appends to its queue and only load() with no argument clears it
@@ -1308,8 +1437,18 @@ async function showDanmaku({ reset = false } = {}) {
         danmakuPlugin.hide();
         return;
     }
+    const timing = danmakuTiming();
+    if (timing.signature !== danmakuState.timing) {
+        danmakuState.timing = timing.signature;
+        reset = true;
+    }
     if (reset) await clearDanmaku();
     const fresh = window.Danmaku.thin(danmakuState.result.raw, DANMAKU_MODES[mode].perSecond)
+        .map(item => ({
+            ...item,
+            time: window.Danmaku.logic.videoTime(item.time, timing.breaks),
+            color: timing.colorful ? item.color : undefined
+        }))
         .filter(item => {
             const id = `${item.time}|${item.text}`;
             if (danmakuState.queued.has(id)) return false;
@@ -1318,6 +1457,7 @@ async function showDanmaku({ reset = false } = {}) {
         });
     if (fresh.length) await danmakuPlugin.load(fresh);
     danmakuPlugin.show();
+    danmakuPanel?.render();
 }
 
 function setDanmakuMode(mode) {
@@ -1350,7 +1490,7 @@ function loadDanmakuForCurrentEpisode() {
     if (key === danmakuState.key) return;
     danmakuState.controller?.abort();
     const controller = new AbortController();
-    Object.assign(danmakuState, { key, controller, result: null, status: '查找中…' });
+    Object.assign(danmakuState, { key, controller, result: null, status: '查找中…', breaks: [], timing: '' });
     clearDanmaku();
     renderDanmakuSetting();
     window.Danmaku.load({
@@ -1358,6 +1498,7 @@ function loadDanmakuForCurrentEpisode() {
         year,
         kind: params.get('kind') || (currentEpisodes.length > 1 ? 'tv' : ''),
         index: currentEpisodeIndex,
+        episodeName: currentEpisodeNames[currentEpisodeIndex] || '',
         duration: Number(art?.video?.duration) || 0,
         from: Number(art?.video?.currentTime) || 0,
         signal: controller.signal,
@@ -1374,7 +1515,7 @@ function loadDanmakuForCurrentEpisode() {
     }).catch(() => null).then(result => {
         if (controller.signal.aborted || danmakuState.key !== key) return;
         danmakuState.result = result;
-        danmakuState.status = result ? `${result.siteName} ${result.raw.length.toLocaleString()} 条` : '这一集没有找到弹幕';
+        danmakuState.status = result ? `${result.siteName} ${result.raw.length.toLocaleString()} 条` : DANMAKU_NOT_FOUND;
         showDanmaku();
         renderDanmakuSetting();
     });
@@ -1740,6 +1881,8 @@ function setupProgressPreview() {
     const fallbackEl = progressPreviewEl.querySelector('.progress-preview-fallback');
 
     function updatePreview(clientX) {
+        // 横过来的网页全屏里坐标方向不同，不显示预览（拖动进度本身由播放器处理）
+        if (art?.isRotate) return;
         const rect = progressBar.getBoundingClientRect();
         const duration = Number(art.duration || art.video.duration || 0);
         const previewTime = getProgressPreviewTime(clientX, rect, duration);
@@ -2399,6 +2542,8 @@ function initPlayer(videoUrl) {
                 // 监听级别加载事件
                 hls.on(Hls.Events.LEVEL_LOADED, function () {
                     updateHlsQualityControl();
+                    // 播放列表到了才知道有没有插播广告段：弹幕时间重新对一下
+                    if (danmakuState.result) showDanmaku();
                     document.getElementById('player-loading').style.display = 'none';
                 });
 
@@ -2420,11 +2565,12 @@ function initPlayer(videoUrl) {
           isTouchDevice: isMobilePlaybackDevice,
           hasEpisodes: () => currentEpisodes.length > 1,
           onEpisodes: toggleEpisodeDrawer,
-          enterNativeFullscreen: enterNativeVideoFullscreen }
+          enterNativeFullscreen: () => enterNativeVideoFullscreen() }
     );
     setupNativeFullscreenHandoff(art.video);
     setupAppScreenWake(art.video);
     setupWebFullscreenSetting();
+    setupWebFullscreenRotation();
     setupPlayerOverlays();
     // 记住用户选择的倍速；新视频加载时浏览器会把倍速重置为 1（此时 readyState 为 0），不能记下来
     art.video.addEventListener('ratechange', () => {

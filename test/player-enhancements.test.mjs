@@ -221,7 +221,7 @@ test('saved progress is restored once per load so later seeks are not pulled bac
   // Long press follows the player node into Artplayer's fullscreen layer.
   assert.match(player, /const playerElement = art\.template\?\.\$player \|\| document\.getElementById\('player'\);/);
   // Fullscreen swipes are not also handled by Artplayer's built-in seek gesture.
-  assert.match(mobile, /event\.stopPropagation\(\);\n\s*const touch = event\.touches\[0\];/);
+  assert.match(mobile, /event\.stopPropagation\(\);\n\s*const point = localPoint\(event\.touches\[0\]\);/);
   assert.match(player, /document\.addEventListener\('keyup', handleKeyboardShortcutRelease\)/);
 });
 
@@ -303,4 +303,18 @@ test('TV mode: detection, remote focus moves to the nearest element in that dire
   assert.match(tvManifest, /android:banner="@drawable\/tv_banner"/);
   assert.match(gradle, /applicationIdSuffix '\.tv'/);
   assert.ok((await stat(new URL('../download/LibreTV-TV.apk', import.meta.url))).size > 20000);
+});
+
+test('touch points are read in the player\'s own axes, also when it is turned for iPhone web fullscreen', async () => {
+  const { api } = await setup();
+  const plain = value => JSON.parse(JSON.stringify(value));
+  // Upright player at (0, 100), 390 × 220.
+  assert.deepEqual(plain(api.playerPoint(50, 150, { left: 0, top: 100, right: 390, width: 390, height: 220 }, false)), { x: 50, y: 50, width: 390, height: 220 });
+  // Turned 90° on a 390 × 844 portrait screen: the player's left edge is the screen's top.
+  const rect = { left: 0, top: 0, right: 390, width: 390, height: 844 };
+  const nearStart = api.playerPoint(200, 30, rect, true);
+  assert.equal(nearStart.x, 30);
+  assert.equal(nearStart.width, 844);
+  assert.equal(api.doubleTapZone(nearStart.x, { left: 0, width: nearStart.width }), 'back');
+  assert.equal(api.doubleTapZone(api.playerPoint(200, 800, rect, true).x, { left: 0, width: 844 }), 'forward');
 });

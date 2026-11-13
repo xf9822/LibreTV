@@ -101,14 +101,21 @@ window.createMobileFullscreenControls = function createMobileFullscreenControls(
         }
     }
 
+    // 触点换成播放器自己的坐标（iPhone 网页全屏横过来时，屏幕方向和播放器方向不同）
+    function localPoint(touch) {
+        const rect = player.getBoundingClientRect();
+        if (window.PlayerEnhancements?.playerPoint) return window.PlayerEnhancements.playerPoint(touch.clientX, touch.clientY, rect, art.isRotate);
+        return { x: touch.clientX - rect.left, y: touch.clientY - rect.top, width: rect.width, height: rect.height };
+    }
+
     function onStart(event) {
-        if (!active || event.touches.length !== 1 || event.target.closest('button, input, .art-controls, .art-setting, .art-settings, .player-top-actions, .player-episode-drawer, .player-next-card, .player-shortcut-help, .player-stats-panel')) return;
-        const touch = event.touches[0];
-        const bounds = player.getBoundingClientRect();
+        if (!active || event.touches.length !== 1 || event.target.closest('button, input, .art-controls, .art-setting, .art-settings, .player-top-actions, .player-episode-drawer, .player-next-card, .player-shortcut-help, .player-stats-panel, .danmaku-panel')) return;
+        const point = localPoint(event.touches[0]);
+        const left = point.x < point.width / 2;
         gesture = {
-            x: touch.clientX, y: touch.clientY, side: touch.clientX < bounds.left + bounds.width / 2 ? 'brightness' : 'volume',
-            initial: touch.clientX < bounds.left + bounds.width / 2 ? brightness : Math.round(video.volume * 100),
-            height: Math.max(bounds.height, 1), width: Math.max(bounds.width, 1), moved: false,
+            x: point.x, y: point.y, side: left ? 'brightness' : 'volume',
+            initial: left ? brightness : Math.round(video.volume * 100),
+            height: Math.max(point.height, 1), width: Math.max(point.width, 1), moved: false,
             mode: null, startTime: video.currentTime || 0, seekTarget: null
         };
     }
@@ -117,9 +124,9 @@ window.createMobileFullscreenControls = function createMobileFullscreenControls(
         if (!active || !gesture || event.touches.length !== 1) return;
         // 全屏手势由这里统一处理；不让 Artplayer 自带的滑动调进度再收到移动事件，否则松手时会把进度改回去
         event.stopPropagation();
-        const touch = event.touches[0];
-        const dx = touch.clientX - gesture.x;
-        const dy = touch.clientY - gesture.y;
+        const point = localPoint(event.touches[0]);
+        const dx = point.x - gesture.x;
+        const dy = point.y - gesture.y;
         if (!gesture.moved) {
             // 横向滑动拖动进度，纵向滑动左侧调亮度、右侧调音量
             if (Math.abs(dx) >= 12 && Math.abs(dx) > Math.abs(dy) * 1.15) {
@@ -192,7 +199,7 @@ window.createMobileFullscreenControls = function createMobileFullscreenControls(
         if (!options.isTouchDevice() || document.fullscreenEnabled || !event.target.closest('.art-control-fullscreen')) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        // iPhone：全屏按钮进入系统全屏（真正的全屏）；已在网页全屏时则是退出
+        // iPhone：全屏按钮进入系统全屏（真正的全屏；开着弹幕时用网页全屏，见 player.js）；已在网页全屏时则是退出
         if (!art.fullscreenWeb && options.enterNativeFullscreen?.()) return;
         art.fullscreenWeb = !art.fullscreenWeb;
         sync();
